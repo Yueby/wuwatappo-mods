@@ -35,8 +35,8 @@ for (const [name, value] of Object.entries(FAST)) {
 }
 
 // One side's chest as the app has it. `outcome`: what the app does when it is done with a press.
-function makeChest({ ready = true, busyMs = 40, outcome = 'opens' } = {}) {
-  const chest = { present: ready, busy: false, disabledFor: 0, presses: 0, ignored: 0, outcome, busyMs, aria: 'false' };
+function makeChest({ ready = true, busyMs = 40, outcome = 'opens', countdown = '29:07' } = {}) {
+  const chest = { present: ready, countdown, busy: false, disabledFor: 0, presses: 0, ignored: 0, outcome, busyMs, aria: 'false' };
   chest.button = {
     get disabled() { return chest.busy; },
     getAttribute: name => (name === 'aria-busy' ? (chest.busy ? 'true' : chest.aria) : null),
@@ -73,9 +73,10 @@ function load({ left = makeChest({ ready: false }), right = makeChest({ ready: f
   };
   const document = {
     querySelector: selector => {
-      const found = /^\.reward-anchor--(left|right) button\.reward-btn$/.exec(selector);
+      const found = /^\.reward-anchor--(left|right) (button\.reward-btn|\.reward-countdown)$/.exec(selector);
       assert.ok(found, `it looked for something the app does not have: ${selector}`);
       const chest = world[found[1]];
+      if (found[2] === '.reward-countdown') return chest.present ? null : { getAttribute: name => (name === 'aria-label' ? chest.countdown : null) };   // a chest that is not ready has its countdown there
       return chest.present ? chest.button : null;
     },
   };
@@ -178,7 +179,7 @@ test('a chest that only becomes ready later is found at the next look', async ()
   const run = load({ left });
   await sleep(150);
   assert.equal(left.presses, 0);
-  assert.equal(run.live.state, '等箱子可以开');
+  assert.match(run.live.state, /^下一个箱子：左 29:07/, 'waiting says for how long');
 
   left.present = true;
   await sleep(250);
@@ -209,4 +210,28 @@ test('switching it off stops it at once, even in the middle of waiting for the a
   await sleep(900);
   assert.equal(run.world.right.presses, 0, 'it did not go on to the other side after being switched off');
   assert.equal(left.presses, 1);
+});
+
+test('while there is nothing to open the state says when the next one can be, from the app\'s own countdown', async () => {
+  const left = makeChest({ ready: false, countdown: '29:07' });
+  const right = makeChest({ ready: false, countdown: '12:30' });
+  const run = load({ left, right });
+  await sleep(120);
+  assert.equal(run.live.state, '下一个箱子：左 29:07，右 12:30');
+
+  run.settings.right = false;                                // a side that is switched off is not waited for
+  await sleep(120);
+  assert.equal(run.live.state, '下一个箱子：左 29:07');
+
+  left.countdown = '29:06';                                  // and it follows the app's clock
+  await sleep(120);
+  assert.equal(run.live.state, '下一个箱子：左 29:06');
+  run.dispose();
+});
+
+test('when the app shows no countdown either, the state falls back to plain words', async () => {
+  const run = load({ left: makeChest({ ready: false, countdown: null }), right: makeChest({ ready: false, countdown: null }) });
+  await sleep(120);
+  run.dispose();
+  assert.equal(run.live.state, '等箱子可以开');
 });

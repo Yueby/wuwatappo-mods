@@ -13,6 +13,9 @@
 // gone, replaced by the next countdown. If the click count is not enough the app says so in a toast and the
 // button stays.
 //
+// While a chest is not ready the app shows its countdown (`.reward-countdown`, with the time left as its
+// aria-label, "29:07"): that is what the state line on the MOD page tells, so that waiting looks like waiting.
+//
 // So this only ever presses the button the app itself shows, only when the app is not busy with it, and it
 // does not press it again at once if that did nothing. It opens nothing the person could not open.
 //
@@ -33,6 +36,7 @@ const holdUntil = { left: 0, right: 0 };
 const sleep = ms => new Promise(resolve => { timer = setTimeout(resolve, ms); });
 const loggedIn = () => !!localStorage.getItem('wuwatappo-login-cuid');
 const buttonOf = side => document.querySelector(`.reward-anchor--${side} button.reward-btn`);
+const countdownOf = side => document.querySelector(`.reward-anchor--${side} .reward-countdown`)?.getAttribute('aria-label') ?? null;
 const busy = button => button.disabled || button.getAttribute('aria-busy') === 'true' || button.classList.contains('reward-btn--loading');
 const showOpened = () => mod.live('opened', `${opened} 个`);
 
@@ -58,6 +62,12 @@ async function press(side) {
     }
   }
   return alive ? 'refused' : 'none';
+}
+
+// What the state says while there is nothing to open: when the next one can be, if the app shows it.
+function waitingText() {
+  const left = SIDES.filter(([side]) => mod.config.get(side)).map(([side, name]) => [name, countdownOf(side)]).filter(([, time]) => time);
+  return left.length ? `下一个箱子：${left.map(([name, time]) => `${name} ${time}`).join('，')}` : '等箱子可以开';
 }
 
 async function run() {
@@ -90,7 +100,7 @@ async function run() {
       }
     }
 
-    mod.live('state', held ? `${held}边的箱子没开成，稍后再试` : did ? '刚开了一个箱子' : '等箱子可以开');
+    mod.live('state', held ? `${held}边的箱子没开成，稍后再试` : did ? '刚开了一个箱子' : waitingText());
     await sleep(mod.config.get('interval') * 1000);
   }
 }
