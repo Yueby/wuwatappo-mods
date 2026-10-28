@@ -6,7 +6,8 @@ write and what to leave out.
 ## Honest about what it does
 
 - `description` says what the plugin does, in a sentence. What it shows on the MOD page matches what it does.
-- `modkit.permissions` lists what it uses (for example `network`, `files`). Nothing enforces it, so it is checked
+- `modkit.permissions` lists what it uses. Use these words, which people are shown in plain Chinese: `files` (读写文件),
+  `network` (联网), `clipboard` (读写剪贴板), `run` (运行其他程序); any other word is shown as written. Nothing enforces it, so it is checked
   against the code: a plugin that talks to the network and does not say so is not merged.
 - A plugin that sends anything off the machine says to whom and what, in its description.
 
