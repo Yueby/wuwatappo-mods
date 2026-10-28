@@ -26,18 +26,24 @@ jobs:
         with:
           node-version: 24
 
+      # See validate.yml: the version of the checker is pinned in .github/modkit-version, and downloaded from
+      # its release's own address.
       - name: Get modkit.exe
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
         run: |
-          dir="$RUNNER_TEMP/modkit"
-          mkdir -p "$dir"
-          gh release download --repo Yueby/wuwatappo-modkit --pattern 'modkit.exe*' --dir "$dir"
-          expected=$(cut -d' ' -f1 "$dir/modkit.exe.sha256")
-          actual=$(sha256sum "$dir/modkit.exe" | cut -d' ' -f1)
-          if [ "$expected" != "$actual" ]; then echo "modkit.exe does not match its checksum"; exit 1; fi
-          echo "MODKIT_EXE=$dir/modkit.exe" >> "$GITHUB_ENV"
+          $version = (Get-Content .github/modkit-version -Raw).Trim()
+          $dir = Join-Path $env:RUNNER_TEMP 'modkit'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $base = "https://github.com/Yueby/wuwatappo-modkit/releases/download/v$version"
+          foreach ($file in 'modkit.exe', 'modkit.exe.sha256') {
+            Write-Output "$base/$file"
+            Invoke-WebRequest -Uri "$base/$file" -OutFile (Join-Path $dir $file) -MaximumRetryCount 3 -RetryIntervalSec 5
+          }
+          $expected = ((Get-Content (Join-Path $dir 'modkit.exe.sha256') -Raw) -split '\s+')[0].ToLower()
+          $actual = (Get-FileHash (Join-Path $dir 'modkit.exe') -Algorithm SHA256).Hash.ToLower()
+          if ($expected -ne $actual) { throw "modkit.exe $version does not match its checksum ($actual instead of $expected)" }
+          & (Join-Path $dir 'modkit.exe') --version
+          "MODKIT_EXE=$(Join-Path $dir 'modkit.exe')" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - name: Publish
         shell: bash
