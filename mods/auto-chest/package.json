@@ -1,0 +1,37 @@
+{
+  "name": "auto-chest",
+  "displayName": "自动开箱子",
+  "version": "0.1.0",
+  "description": "箱子可以开的时候自动点开，开箱子会消耗点击数",
+  "author": "Yueby",
+  "modkit": {
+    "defaultEnabled": false,
+    "windows": { "main": "main.js" },
+    "settings": [
+      {
+        "key": "left",
+        "type": "toggle",
+        "title": "开左边的箱子",
+        "default": true
+      },
+      {
+        "key": "right",
+        "type": "toggle",
+        "title": "开右边的箱子",
+        "default": true
+      },
+      {
+        "key": "interval",
+        "type": "number",
+        "title": "检查间隔（秒）",
+        "description": "每隔多久看一次箱子能不能开，1–60",
+        "default": 3,
+        "min": 1,
+        "max": 60,
+        "step": 1
+      },
+      { "key": "state", "type": "value", "title": "状态", "default": "未运行" },
+      { "key": "opened", "type": "value", "title": "本次已开", "default": "0 个" }
+    ]
+  }
+}

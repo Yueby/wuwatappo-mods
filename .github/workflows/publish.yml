@@ -26,6 +26,9 @@ jobs:
         with:
           node-version: 24
 
+      # The plugins' own tests (a stand-in for the app: nothing here touches an account).
+      - run: npm test
+
       # See validate.yml: the version of the checker is pinned in .github/modkit-version, and downloaded from
       # its release's own address.
       - name: Get modkit.exe

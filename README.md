@@ -31,4 +31,5 @@ match is thrown away. A released version is never replaced; a fix is a new versi
    `modkit.exe mods check mods\<id> --registry`
 4. Changing a plugin means raising its `version` in the same pull request.
 
+A plugin comes with a test when it does something that needs one (`tests/`, run by `npm test`, against a stand-in for the app).
 What a reviewer looks for is in [CONTRIBUTING.md](CONTRIBUTING.md). Read it before you write the plugin, not after.

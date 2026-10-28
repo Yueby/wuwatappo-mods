@@ -21,6 +21,9 @@ jobs:
         with:
           node-version: 24
 
+      # The plugins' own tests (a stand-in for the app: nothing here touches an account).
+      - run: npm test
+
       # The program the plugins are for reads their manifests (`modkit.exe mods check`), so what passes here
       # is what loads there. Which version of it is written in .github/modkit-version, so a change of the
       # checker is a change in this repository; it is downloaded from that release's own address (no API, no

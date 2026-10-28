@@ -1,22 +1,13 @@
 {
   "name": "auto-click",
   "displayName": "自动点击",
-  "version": "0.4.0",
-  "description": "按设定间隔模拟鼠标点击，增加点击数",
+  "version": "0.5.0",
+  "description": "开着的时候，按设定的间隔自动点击桌宠，增加点击数",
   "author": "Yueby",
   "modkit": {
-    "windows": {
-      "main": "main.js"
-    },
+    "defaultEnabled": false,
+    "windows": { "main": "main.js" },
     "settings": [
-      {
-        "key": "running",
-        "type": "toggle",
-        "title": "开始点击",
-        "description": "开启后按设定间隔模拟点击。重启或重载后恢复为关闭，不会自己再开",
-        "default": false,
-        "persist": false
-      },
       {
         "key": "interval",
         "type": "number",
@@ -27,18 +18,8 @@
         "max": 5000,
         "step": 10
       },
-      {
-        "key": "state",
-        "type": "value",
-        "title": "状态",
-        "default": "未运行"
-      },
-      {
-        "key": "sent",
-        "type": "value",
-        "title": "本次已发送",
-        "default": "0 次"
-      }
+      { "key": "state", "type": "value", "title": "状态", "default": "未运行" },
+      { "key": "sent", "type": "value", "title": "本次已点击", "default": "0 次" }
     ]
   }
 }

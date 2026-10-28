@@ -13,9 +13,12 @@ write and what to leave out.
 
 ## Nothing that acts on the account unless the person turns it on
 
-- Anything that clicks, sends, buys, opens, claims or otherwise acts as the player is **off by default** and
-  stays off after a restart (`"persist": false` on its switch), so it is never running because of something
-  that was set up long ago. The person turns it on, knowing.
+- Anything that clicks, sends, buys, opens, claims or otherwise acts as the player is **off by default**
+  (`"defaultEnabled": false` in `modkit`), and works only while its master switch on the MOD page is on:
+  no switch of its own inside, so there is one thing to look at to know whether it is running. The person
+  turns it on, knowing, and turning it off stops it at once (`mod.onDispose`).
+- It presses what the app itself shows, the way a person would, and does not call the server or the app's
+  commands behind its back to do what the app would not.
 - It does not read or send the login, tokens, cookies or anything of the account's.
 
 ## Readable
