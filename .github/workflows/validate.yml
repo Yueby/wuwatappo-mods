@@ -1,0 +1,39 @@
+# A pull request: every plugin is checked the way the launcher will read it, and one whose files changed
+# has to have a new version. Nothing is published.
+
+name: validate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0                 # the check compares with the branch the pull request is for
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The program the plugins are for reads their manifests (`modkit.exe mods check`), so what passes here
+      # is what loads there. It is the latest release of the launcher, and it has to match its checksum.
+      - name: Get modkit.exe
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dir="$RUNNER_TEMP/modkit"
+          mkdir -p "$dir"
+          gh release download --repo Yueby/wuwatappo-modkit --pattern 'modkit.exe*' --dir "$dir"
+          expected=$(cut -d' ' -f1 "$dir/modkit.exe.sha256")
+          actual=$(sha256sum "$dir/modkit.exe" | cut -d' ' -f1)
+          if [ "$expected" != "$actual" ]; then echo "modkit.exe does not match its checksum"; exit 1; fi
+          echo "MODKIT_EXE=$dir/modkit.exe" >> "$GITHUB_ENV"
+
+      - run: node scripts/build.mjs --base origin/${{ github.base_ref }}

@@ -1,0 +1,46 @@
+# Something was merged: each plugin version that has no release gets one (tag <id>-v<version>, the zip as its
+# asset), and index.json, which is what the launcher lists, is replaced on the release called "index".
+# A version that is already released is never touched.
+
+name: publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write                        # releases
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Get modkit.exe
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dir="$RUNNER_TEMP/modkit"
+          mkdir -p "$dir"
+          gh release download --repo Yueby/wuwatappo-modkit --pattern 'modkit.exe*' --dir "$dir"
+          expected=$(cut -d' ' -f1 "$dir/modkit.exe.sha256")
+          actual=$(sha256sum "$dir/modkit.exe" | cut -d' ' -f1)
+          if [ "$expected" != "$actual" ]; then echo "modkit.exe does not match its checksum"; exit 1; fi
+          echo "MODKIT_EXE=$dir/modkit.exe" >> "$GITHUB_ENV"
+
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/build.mjs --publish
