@@ -458,7 +458,7 @@ test('opening a room shows what happened in it, newest first, with how long each
   toggle.press();
   assert.deepEqual(panel.titles().slice(3), ['房间号 AAA', '　早到的 掉线了', '　小明 离开了房间', '　阿青 进入了房间', '　小明 进入了房间', '　早到的 已在房间里']);
   assert.equal(panel.row('　小明 离开了房间').description, '待了 12 分钟', 'came 14:10, went 14:22');
-  assert.equal(panel.row('　早到的 掉线了').description, '至少待了 40 分钟（您进房时他已经在）', 'he was already there: it is a longer time than it says');
+  assert.equal(panel.row('　早到的 掉线了').description, '至少待了 40 分钟（进房前就已在房间里）', 'he was already there: it is a longer time than it says');
   assert.equal(panel.row('　阿青 进入了房间').description, '');
   assert.equal(panel.controlsOf('房间号 AAA')[1].textContent, '收起');
 
@@ -841,11 +841,11 @@ test('started again while somebody is offline, as the last thing written of them
   assert.deepEqual(again.history().map(e => e.type), ['here', 'offline'], 'still offline: no news');
 });
 
-test('what the plugin shows to the person does not speak as the plugin: no first person in the texts it displays', () => {
+test('what the plugin shows is not spoken: no 我, 咱, 您, 你, 他, 她 in the texts it displays (names and labels, like the app\'s own)', () => {
   const shown = [manifest.description, manifest.displayName, ...manifest.modkit.settings.flatMap(setting => [setting.title, setting.description])];
   const code = (mainSource + panelSource).split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
   const strings = [...code.matchAll(/'([^'\n]*)'|`([^`\n]*)`/g)].map(match => match[1] ?? match[2]).filter(text => /[\u4e00-\u9fff]/.test(text));
   for (const text of [...shown.filter(Boolean), ...strings]) {
-    assert.ok(!/[我咱]/.test(text.replace(/我自己|我勒个豆/g, '')), `first person in "${text}"`);
+    assert.ok(!/[我咱您你她]|(?<!其)他/.test(text.replace(/我自己|我勒个豆/g, '')), `a person word in "${text}"`);
   }
 });

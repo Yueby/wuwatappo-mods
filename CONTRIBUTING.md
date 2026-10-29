@@ -33,7 +33,7 @@ write and what to leave out.
 
 ## Behaves
 
-- What it shows to the person is written to them, in plain words, and not as if the plugin were speaking: "您进房时他已经在", not "我进房时他已经在". No first person (我, 咱) in anything on the MOD page.
+- What it shows is plain labels and statements, the way the app's own pages are written ("离开房间", "房间号：…"): not spoken, neither as the plugin ("我进入了房间") nor to the person ("您进房时他已经在"). No 我, 咱, 您, 你, 他, 她 in anything on the MOD page; say what happened, not who is speaking to whom.
 - It removes what it added when it is turned off or unloaded (`mod.onDispose`), and does not keep a timer or
   a listener running after.
 - It does not break the app's own pages: it uses the app's styles for anything it shows (see MODDING.md).

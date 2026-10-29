@@ -166,7 +166,7 @@ function visitRow(visit, isOpen, here) {
 
 function eventRow(event) {
   let description = '';
-  if (event.stayed != null) description = `${event.atLeast ? '至少待了' : '待了'} ${lengthText(event.stayed)}${event.atLeast ? '（您进房时他已经在）' : ''}`;
+  if (event.stayed != null) description = `${event.atLeast ? '至少待了' : '待了'} ${lengthText(event.stayed)}${event.atLeast ? '（进房前就已在房间里）' : ''}`;
   return {
     title: `　${(TEXT[event.type] ?? (() => event.type))(event)}`,        // set in a little, under its room
     description,
