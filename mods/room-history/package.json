@@ -1,0 +1,24 @@
+{
+  "name": "room-history",
+  "displayName": "房间历史",
+  "version": "0.1.0",
+  "description": "记录进入和离开房间的玩家，带房间号和时间，只保存在这台电脑上",
+  "author": "Yueby",
+  "modkit": {
+    "windows": { "main": "main.js", "panel": "panel.js" },
+    "settings": [
+      { "key": "room", "type": "value", "title": "当前房间号", "default": "不在房间里" },
+      { "key": "count", "type": "value", "title": "已记录", "default": "0 条" },
+      {
+        "key": "max",
+        "type": "number",
+        "title": "最多保留",
+        "description": "超过这个条数时，最旧的会被删掉，20–2000",
+        "default": 300,
+        "min": 20,
+        "max": 2000,
+        "step": 10
+      }
+    ]
+  }
+}

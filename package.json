@@ -4,7 +4,7 @@
   "type": "module",
   "description": "The plugin registry for wuwatappo-modkit: the plugins, their tests, and the automation that publishes them.",
   "scripts": {
-    "test": "node --test --test-timeout=60000 tests/auto-click.test.js tests/auto-chest.test.js",
+    "test": "node --test --test-timeout=60000 tests/auto-click.test.js tests/auto-chest.test.js tests/room-history.test.js",
     "build": "node scripts/build.mjs"
   },
   "engines": {
