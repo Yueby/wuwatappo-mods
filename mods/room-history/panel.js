@@ -11,7 +11,7 @@ const STORE = 'modkit-room-history';
 const VISITS = 30;                 // rooms in the dialog; the records of the rest are kept, and counted on the first row
 
 const TEXT = {
-  here: entry => `${entry.name || '玩家'} 已在房间里`,
+  here: entry => `${entry.name || '玩家'} 已在房间里${entry.owner ? '（房主）' : ''}${entry.offline ? '（离线）' : ''}`,
   join: entry => `${entry.name || '玩家'} 进入了房间`,
   leave: entry => `${entry.name || '玩家'} 离开了房间`,
   offline: entry => `${entry.name || '玩家'} 掉线了`,

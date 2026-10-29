@@ -48,6 +48,7 @@ function makeWebSocket() {
       for (const fn of [...this.listeners[type], handlers.get(this)?.[type]].filter(Boolean)) fn(event);
     }
     frame(event, payload) { this.deliver('message', { data: `42["${event}",${JSON.stringify(payload)}]\n` }); }
+    answer(number, reply) { this.deliver('message', { data: `43${number}[${JSON.stringify(reply)}]\n` }); }
   }
   for (const type of ['open', 'message', 'close']) {
     Object.defineProperty(FakeWebSocket.prototype, `on${type}`, {
@@ -348,7 +349,7 @@ test('the log says what the first message of each kind looked like, and what cou
   socket.frame('rj', { a: 6, n: '乙' });
   socket.frame('rl', { a: 5 });
   assert.deepEqual(run.logs.map(l => l.replace(/：.*/, '')), ['第一次收到 rj', '第一次收到 rl'], 'once for each kind');
-  assert.match(run.logs[0], /"a":5,"n":"甲"/, 'as it came');
+  assert.match(run.logs[0], /"a":5,"n":"〇"/, 'as it came, but for the nickname');
 
   for (let i = 0; i < 30; i += 1) socket.frame('rl', { a: 'not an id' });
   socket.frame('rj', { n: '没有编号' });
@@ -500,4 +501,81 @@ test('a damaged history does not stop the page from drawing: what cannot be read
   }
   const partly = loadPanel('[null, 5, {"room": 1}, {"t": 1, "room": "X", "type": "join", "id": 3, "name": "还在"}]');
   assert.deepEqual(partly.titles(), ['清空记录', '房间号 X', '　还在 进入了房间'], 'the one record that is whole is shown');
+});
+
+// --- who is already in the room --------------------------------------------------------------------------
+
+const ROSTER = { c: 0, d: { r: 'V3f9IQD1f', m: [{ u: 5, n: '房主甲', o: 1, l: 1 }, { u: 6, n: '路人乙', o: 0, l: 1 }, { u: 7, n: '离线丙', o: 0, l: 0 }] } };
+
+test('the people who are in the room when it is entered, from the answer the app gets, are "here", with the owner and who is offline', async () => {
+  const run = load();
+  const socket = run.connect();
+  socket.deliver('open');
+  socket.answer(12, ROSTER);
+
+  assert.deepEqual(run.history().slice(1).map(e => [e.type, e.name, e.id, e.owner ?? false, e.offline ?? false, e.room]), [
+    ['here', '房主甲', 5, true, false, 'V3f9IQD1f'],
+    ['here', '路人乙', 6, false, false, 'V3f9IQD1f'],
+    ['here', '离线丙', 7, false, true, 'V3f9IQD1f'],
+  ]);
+
+  socket.frame('rl', { a: 6 });                              // they are known now: a leave has the nickname
+  assert.deepEqual(kinds(run).at(-1), ['leave', '路人乙', 'V3f9IQD1f']);
+  assert.match(run.logs[0], /第一次收到 名单：.*"n":"〇〇〇"/, 'the shape is in the log, the nicknames are not');
+  assert.ok(!run.logs.join('\n').includes('房主甲'));
+});
+
+test('somebody already told about by an event is not written twice when the list comes', async () => {
+  const run = load();
+  const socket = run.connect();
+  socket.deliver('open');
+  socket.frame('rc', { a: 6, n: '路人乙', b: 1, c: 1, d: '', o: 0 });
+  socket.answer(1, ROSTER);
+  socket.answer(2, ROSTER);                                  // asked again: nobody is new
+
+  assert.deepEqual(kinds(run).slice(1).map(k => k[1]), ['路人乙', '房主甲', '离线丙']);
+});
+
+test('an answer that is not the list of a room is left alone, and a member that cannot be read is said so', async () => {
+  const run = load();
+  const socket = run.connect();
+  socket.deliver('open');
+  socket.answer(1, { c: 0, d: { r: 'V3f9IQD1f' } });        // an answer with no members
+  socket.answer(2, { c: 0 });
+  socket.answer(3, 'ok');
+  socket.deliver('message', { data: '43' });
+  socket.deliver('message', { data: '43[broken' });
+  assert.deepEqual(run.history().length, 1, 'only the coming in');
+  assert.deepEqual(run.warnings, []);
+
+  socket.answer(4, { c: 0, d: { r: 'V3f9IQD1f', m: [{ n: '没有编号' }, { u: 9, n: '正常' }] } });
+  assert.deepEqual(kinds(run).slice(1).map(k => k[1]), ['正常']);
+  assert.match(run.warnings[0], /没能读懂 名单/);
+});
+
+test('a connection with no room writes nothing even when a list comes; one picked up late reads a list if one does come', async () => {
+  const run = load();
+  const lobby = run.connect(ROOM_URL(''));
+  lobby.deliver('open');
+  lobby.answer(1, ROSTER);
+  assert.deepEqual(run.history(), [], 'a connection with no room writes nothing');
+
+  const WebSocket = makeWebSocket();
+  const storage = makeStorage();
+  const late = new WebSocket(ROOM_URL('LATE'));
+  late.deliver('open');
+  new AsyncFunction('mod', 'WebSocket', 'localStorage', 'window', source)({ log() {}, warn() {}, live() {}, onDispose: fn => running.push({ dispose: fn }), config: { get: () => 300 } }, WebSocket, storage, { addEventListener() {}, removeEventListener() {} });
+  late.send('2');                                            // picked up at the ping: the list came long ago
+  late.answer(1, { c: 0, d: { r: 'LATE', m: [{ u: 1, n: '谁', o: 0, l: 1 }] } });
+  assert.deepEqual(JSON.parse(storage.data['modkit-room-history'] ?? '[]').map(e => e.type), ['here'], 'if one does come, it is read');
+});
+
+test('in the list in the dialog the owner and the one who is offline are said', () => {
+  const panel = loadPanel([
+    { t: at(29, 9, 0), room: 'EEE', type: 'me-in' },
+    { t: at(29, 9, 0, 1), room: 'EEE', type: 'here', id: 1, name: '房主', owner: true },
+    { t: at(29, 9, 0, 1), room: 'EEE', type: 'here', id: 2, name: '掉线的', offline: true },
+    { t: at(29, 9, 0, 1), room: 'EEE', type: 'here', id: 3, name: '普通人' },
+  ]);
+  assert.deepEqual(panel.titles().slice(2), ['　普通人 已在房间里', '　掉线的 已在房间里（离线）', '　房主 已在房间里（房主）']);
 });

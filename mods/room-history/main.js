@@ -13,6 +13,10 @@
 //     rl  {a: id}                   somebody left
 //     ro  {a: id}                   somebody went offline (still in the room)
 //     rs  {r: room number}          the room was closed
+// and who is in a room when the app comes into it is not an event: it is the answer to the app's own
+// request for the room (an acknowledgement, `43<number>[…]`):
+//     {c: 0, d: {r: room number, m: [{u: id, n: nickname, o: 1 if the owner, l: 1 if online}, …]}}
+// Those are the ones "already there". A plugin that starts while the app is in a room has missed that answer.
 // (`rc` with a text `a`, "95007|99051", is who pressed a key, and `rc` with only `a` and `o` is something
 // else again: neither says who is in the room.) A leave names an id and not a nickname, so the nickname is
 // remembered from when the person came in.
@@ -74,9 +78,18 @@ function nameOf(session, id) {
 
 // --- what a frame says ----------------------------------------------------------------------------------
 
-// `42["rj",{…}]`, or with the number of an acknowledgement before the bracket: [event, payload], or null.
+// `42["rj",{…}]`, or with the number of an acknowledgement before the bracket: { event, payload }, or null.
+// An answer to a request, `43<number>[{…}]`, is { event: 'ack', payload: the answer }.
 function parseFrame(data) {
   if (typeof data !== 'string') return null;
+  const answer = /^43\d*(\[[\s\S]*\])\s*$/.exec(data);
+  if (answer) {
+    try {
+      return { event: 'ack', payload: JSON.parse(answer[1])[0] };
+    } catch {
+      return null;
+    }
+  }
   const found = /^42\d*(\[[\s\S]*\])\s*$/.exec(data);
   if (!found) return null;
   try {
@@ -103,7 +116,15 @@ function nameIn(payload) {
 const shown = new Set();
 let unclear = 0;
 const MAX_UNCLEAR = 10;
-const excerpt = payload => { try { return JSON.stringify(payload).slice(0, 200); } catch { return String(payload); } };
+// Nicknames are not copied into the log: each is shown as 〇 for every character, so that the shape is there and
+// the people are not.
+const excerpt = payload => {
+  try {
+    return JSON.stringify(payload, (key, value) => (key === 'n' && typeof value === 'string' ? '〇'.repeat(value.length) : value)).slice(0, 300);
+  } catch {
+    return String(payload);
+  }
+};
 
 function sample(event, payload) {
   if (shown.has(event)) return;
@@ -137,8 +158,41 @@ function seen(session, event, payload) {
   record({ room: session.room, type: already ? 'here' : 'join', id, name: name || nameOf(session, id) });
 }
 
+// The answer to the app's request for the room: everybody who is in it. They were there; nobody came in.
+// Anything else the app is answered (it asks for other things) has no member list in it, and is not ours.
+function roster(session, answer) {
+  const list = answer?.d?.m;
+  if (!Array.isArray(list) || typeof answer.d.r !== 'string') return;
+  sample('名单', answer);
+  for (const member of list) {
+    const id = idOf(member?.u);
+    if (!id) {
+      cannotRead('名单', member);
+      continue;
+    }
+    const name = nameIn(member);
+    const known = session.members.get(id);
+    if (known) {                                       // told already, by an event
+      if (name) known.name = name;
+      continue;
+    }
+    const online = member.l === 1 || member.l === true;
+    session.members.set(id, { name, online });
+    record({
+      room: session.room,
+      type: 'here',
+      id,
+      name: name || nameOf(session, id),
+      ...(member.o === 1 || member.o === true ? { owner: true } : {}),
+      ...(online ? {} : { offline: true }),
+    });
+  }
+}
+
 function handle(session, { event, payload }) {
-  if (event === 'rj') {
+  if (event === 'ack') {
+    roster(session, payload);
+  } else if (event === 'rj') {
     sample(event, payload);
     seen(session, event, payload);
   } else if (event === 'rc') {
