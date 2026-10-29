@@ -1,7 +1,7 @@
 {
   "name": "auto-chest",
   "displayName": "自动开箱子",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "箱子可以开的时候自动点开，开箱子会消耗点击数",
   "author": "Yueby",
   "modkit": {
@@ -9,15 +9,15 @@
     "windows": { "main": "main.js" },
     "settings": [
       {
-        "key": "left",
+        "key": "right",
         "type": "toggle",
-        "title": "开左边的箱子",
+        "title": "开上面的箱子",
         "default": true
       },
       {
-        "key": "right",
+        "key": "left",
         "type": "toggle",
-        "title": "开右边的箱子",
+        "title": "开下面的箱子",
         "default": true
       },
       {

@@ -21,7 +21,11 @@
 //
 // Runs in the main window only (see "modkit.windows" in package.json): that is where the chests are.
 
-const SIDES = [['left', '左'], ['right', '右']];
+// The app calls the two chests "left" and "right" (reward-anchor--left, --right); on the screen they are one
+// above the other, at the pet's right side: "left" is the lower one (bottom: 24px) and "right" the upper
+// one (bottom: 72px). They are named here as they look, the upper one first. The keys stay the app's, because
+// they are also what the settings are stored under.
+const SIDES = [['right', '上面'], ['left', '下面']];
 const POLL_MS = 250;              // how often it looks while the app is opening a chest
 const SETTLE_MS = 30_000;         // the longest it waits for the app to be done with one
 const NOTHING_HAPPENED_MS = 2000; // a press the app does not even start on has been ignored
@@ -91,16 +95,16 @@ async function run() {
       if (result === 'opened') {
         opened += 1;
         did = true;
-        mod.log(`开了${name}边的箱子`);
+        mod.log(`开了${name}的箱子`);
         showOpened();
       } else if (result === 'refused') {
         holdUntil[side] = Date.now() + RETRY_MS;
         held = name;
-        mod.warn(`${name}边的箱子没有开成（点击数可能不够），${RETRY_MS / 1000} 秒后再试`);
+        mod.warn(`${name}的箱子没有开成（点击数可能不够），${RETRY_MS / 1000} 秒后再试`);
       }
     }
 
-    mod.live('state', held ? `${held}边的箱子没开成，稍后再试` : did ? '刚开了一个箱子' : waitingText());
+    mod.live('state', held ? `${held}的箱子没开成，稍后再试` : did ? '刚开了一个箱子' : waitingText());
     await sleep(mod.config.get('interval') * 1000);
   }
 }

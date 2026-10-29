@@ -90,7 +90,7 @@ function load({ left = makeChest({ ready: false }), right = makeChest({ ready: f
 
 test('it is off until the person turns it on, with the master switch as the switch, and only what a person could do', () => {
   assert.equal(manifest.modkit.defaultEnabled, false, 'opening chests spends clicks on the account: it starts off');
-  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['left', 'right', 'interval', 'state', 'opened']);
+  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['right', 'left', 'interval', 'state', 'opened']);
   assert.ok(!/invoke|fetch|XMLHttpRequest|chests\/open/.test(original.replace(/\/\/.*$/gm, '')), 'it does not call the server or the app\'s commands itself: it presses the button');
 });
 
@@ -101,7 +101,7 @@ test('a chest that is ready is pressed once, and counted when the app has opened
 
   assert.equal(run.world.left.presses, 1);
   assert.equal(run.live.opened, '1 个');
-  assert.match(run.logs.join('\n'), /开了左边的箱子/);
+  assert.match(run.logs.join('\n'), /开了下面的箱子/);
 });
 
 test('both sides are opened, one after the other', async () => {
@@ -146,7 +146,7 @@ test('a chest the app refuses (it is back, idle) is not pressed again at once, o
   await sleep(250);
   assert.equal(run.world.left.presses, 1, 'once, then it waits');
   assert.equal(run.world.right.presses, 1, 'the other side was not held up by it');
-  assert.match(run.live.state, /左边的箱子没开成/);
+  assert.match(run.live.state, /下面的箱子没开成/);
   assert.match(run.warnings.join('\n'), /点击数可能不够/);
 
   await sleep(600);                                          // past the pause (400 ms here)
@@ -179,7 +179,7 @@ test('a chest that only becomes ready later is found at the next look', async ()
   const run = load({ left });
   await sleep(150);
   assert.equal(left.presses, 0);
-  assert.match(run.live.state, /^下一个箱子：左 29:07/, 'waiting says for how long');
+  assert.match(run.live.state, /^下一个箱子：上面 29:07，下面 29:07/, 'waiting says for how long, the upper one first');
 
   left.present = true;
   await sleep(250);
@@ -201,15 +201,15 @@ test('not logged in: nothing is pressed; once someone logs in it works', async (
 });
 
 test('switching it off stops it at once, even in the middle of waiting for the app, and nothing is pressed afterwards', async () => {
-  const left = makeChest({ busyMs: 600 });
-  const run = load({ left, right: makeChest({ busyMs: 30 }) });
-  await sleep(100);                                          // pressed left, waiting for the app
-  assert.equal(left.presses, 1);
+  const upper = makeChest({ busyMs: 600 });                  // the upper one ("right" in the app) is pressed first
+  const run = load({ right: upper, left: makeChest({ busyMs: 30 }) });
+  await sleep(100);                                          // pressed the upper one, waiting for the app
+  assert.equal(upper.presses, 1);
   run.dispose();
 
   await sleep(900);
-  assert.equal(run.world.right.presses, 0, 'it did not go on to the other side after being switched off');
-  assert.equal(left.presses, 1);
+  assert.equal(run.world.left.presses, 0, 'it did not go on to the other chest after being switched off');
+  assert.equal(upper.presses, 1);
 });
 
 test('while there is nothing to open the state says when the next one can be, from the app\'s own countdown', async () => {
@@ -217,15 +217,15 @@ test('while there is nothing to open the state says when the next one can be, fr
   const right = makeChest({ ready: false, countdown: '12:30' });
   const run = load({ left, right });
   await sleep(120);
-  assert.equal(run.live.state, '下一个箱子：左 29:07，右 12:30');
+  assert.equal(run.live.state, '下一个箱子：上面 12:30，下面 29:07');
 
   run.settings.right = false;                                // a side that is switched off is not waited for
   await sleep(120);
-  assert.equal(run.live.state, '下一个箱子：左 29:07');
+  assert.equal(run.live.state, '下一个箱子：下面 29:07');
 
   left.countdown = '29:06';                                  // and it follows the app's clock
   await sleep(120);
-  assert.equal(run.live.state, '下一个箱子：左 29:06');
+  assert.equal(run.live.state, '下一个箱子：下面 29:06');
   run.dispose();
 });
 
