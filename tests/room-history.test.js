@@ -28,6 +28,14 @@ for (const [name, value] of Object.entries({ SETTLE_MS: 120, LEAVE_GRACE_MS: 150
   source = source.replace(pattern, `const ${name} = ${value};`);
 }
 
+// The panel half polls every two seconds and writes again every ten; a test cannot wait that.
+let panelFast = panelSource;
+for (const [name, value] of Object.entries({ POLL_MS: 30, REFRESH_MS: 200 })) {
+  const pattern = new RegExp(`const ${name} = [\\d_]+;`);
+  assert.match(panelFast, pattern, `${name} is in the panel half`);
+  panelFast = panelFast.replace(pattern, `const ${name} = ${value};`);
+}
+
 // A WebSocket as the browser has it: onopen / onmessage / onclose are accessors on the prototype, and what
 // the page sets there is called with the event.
 function makeWebSocket() {
@@ -375,13 +383,14 @@ test('the leaving is dated when the connection was lost, not when the wait for a
 
 const at = (day, h, m, s = 0) => new Date(2026, 9, day, h, m, s).getTime();
 
-function loadPanel(entries, { here = null, clipboard = { writes: [], fails: false } } = {}) {
+function loadPanel(entries, { here = null, clipboard = { writes: [], fails: false }, vue = null } = {}) {
   const storage = makeStorage(entries ? { 'modkit-room-history': typeof entries === 'string' ? entries : JSON.stringify(entries) } : {});
   const rows = [];
   let redraws = 0;
+  const disposers = [];
   const mod = {
     entry: def => { rows.push(def); return () => rows.splice(rows.indexOf(def), 1); },
-    onDispose: fn => running.push({ dispose: fn }),
+    onDispose: fn => { disposers.push(fn); running.push({ dispose: fn }); },
   };
   const listeners = [];
   const live = new Map([['room-history', new Map(here ? [['room', here]] : [])]]);
@@ -391,11 +400,15 @@ function loadPanel(entries, { here = null, clipboard = { writes: [], fails: fals
     removeEventListener() {},
   };
   const makeButton = () => ({ handlers: [], className: '', textContent: '', addEventListener(type, fn) { this.handlers.push(fn); }, press() { this.handlers.forEach(fn => fn()); } });
-  const document = { createElement: tag => { assert.equal(tag, 'button'); return makeButton(); } };
+  const document = {
+    createElement: tag => { assert.equal(tag, 'button'); return makeButton(); },
+    querySelector: selector => (selector === '#app' && vue ? { __vue_app__: vue } : null),
+  };
   const navigator = { clipboard: { writeText: text => { clipboard.writes.push(text); return clipboard.fails ? Promise.reject(new Error('no')) : Promise.resolve(); } } };
-  new AsyncFunction('mod', 'localStorage', 'window', 'document', 'navigator', panelSource)(mod, storage, window, document, navigator);
+  new AsyncFunction('mod', 'localStorage', 'window', 'document', 'navigator', panelFast)(mod, storage, window, document, navigator);
   return {
     rows, storage, clipboard,
+    dispose: () => disposers.forEach(fn => fn()),
     redraws: () => redraws,
     titles: () => rows.map(r => r.title),
     row: title => rows.find(r => r.title === title),
@@ -578,4 +591,252 @@ test('in the list in the dialog the owner and the one who is offline are said', 
     { t: at(29, 9, 0, 1), room: 'EEE', type: 'here', id: 3, name: '普通人' },
   ]);
   assert.deepEqual(panel.titles().slice(2), ['　普通人 已在房间里', '　掉线的 已在房间里（离线）', '　房主 已在房间里（房主）']);
+});
+
+// --- who was there when the plugin started: the panel's list -----------------------------------------------
+
+const MEMBERS_KEY = 'modkit-room-history-members';
+
+// A plugin started in the middle of a room: the socket was open before it, the panel has said who is in it.
+function loadLate({ room = 'LATE', snapshot = null, reuse = null } = {}) {
+  const WebSocket = reuse?.WebSocket ?? makeWebSocket();
+  const storage = reuse?.storage ?? makeStorage();
+  if (snapshot) storage.data[MEMBERS_KEY] = JSON.stringify(snapshot);
+  const socket = reuse?.socket ?? new WebSocket(ROOM_URL(room));
+  if (!reuse) socket.deliver('open');
+  const listeners = [];
+  const disposers = [];
+  const mod = { log() {}, warn() {}, live() {}, onDispose: fn => { disposers.push(fn); running.push({ dispose: fn }); }, config: { get: () => 300 } };
+  const window = {
+    addEventListener: (type, fn) => listeners.push([type, fn]),
+    removeEventListener() {},
+  };
+  new AsyncFunction('mod', 'WebSocket', 'localStorage', 'window', source)(mod, WebSocket, storage, window);
+  return {
+    socket, storage, WebSocket,
+    dispose: () => disposers.forEach(fn => fn()),
+    history: () => JSON.parse(storage.data['modkit-room-history'] ?? '[]'),
+    say: snapshot => { storage.data[MEMBERS_KEY] = JSON.stringify(snapshot); for (const [type, fn] of listeners) if (type === 'storage') fn({ key: MEMBERS_KEY }); },
+  };
+}
+
+const people = [
+  { id: 99, name: '我自己', owner: false, online: true },
+  { id: 1, name: '房主', owner: true, online: true },
+  { id: 2, name: '掉线的', owner: false, online: false },
+];
+
+test('started in the middle of a room, the people the panel says are there are written as "here", and the person themselves is not one of them', () => {
+  const late = loadLate({ snapshot: { room: 'LATE', self: 99, t: Date.now(), members: people } });
+  assert.deepEqual(late.history(), [], 'nothing until the connection is picked up');
+
+  late.socket.send('2');                                      // the ping: it is picked up
+  assert.deepEqual(late.history().map(e => [e.type, e.name, e.id, e.owner ?? false, e.offline ?? false, e.room]), [
+    ['here', '房主', 1, true, false, 'LATE'],
+    ['here', '掉线的', 2, false, true, 'LATE'],
+  ]);
+
+  late.say({ room: 'LATE', self: 99, t: Date.now(), members: [...people, { id: 3, name: '新来的', owner: false, online: true }] });
+  late.say({ room: 'LATE', self: 99, t: Date.now(), members: [...people, { id: 3, name: '新来的', owner: false, online: true }] });
+  assert.deepEqual(late.history().map(e => e.name), ['房主', '掉线的', '新来的'], 'the new one once; the ones known are not written again');
+
+  late.socket.frame('rl', { a: 2 });                          // known now: the leave has the nickname
+  assert.deepEqual(late.history().at(-1), { ...late.history().at(-1), type: 'leave', name: '掉线的' });
+
+  late.socket.frame('rj', { a: 99, n: '我自己' });            // the person themselves
+  late.socket.frame('rl', { a: 99 });
+  late.socket.frame('ro', { a: 99 });
+  assert.equal(late.history().length, 4, 'what is about oneself is the connection opening and closing, not these');
+});
+
+test('a copy of the panel\'s list that is for another room, old, or damaged is not believed', () => {
+  for (const [label, snapshot] of [
+    ['another room', { room: 'OTHER', self: 99, t: Date.now(), members: people }],
+    ['old', { room: 'LATE', self: 99, t: Date.now() - 120_000, members: people }],
+    ['no time', { room: 'LATE', self: 99, members: people }],
+    ['no members', { room: 'LATE', self: 99, t: Date.now(), members: 'x' }],
+  ]) {
+    const late = loadLate({ snapshot });
+    late.socket.send('2');
+    assert.deepEqual(late.history(), [], label);
+  }
+  const broken = loadLate();
+  broken.storage.data[MEMBERS_KEY] = '{nope';
+  broken.socket.send('2');
+  assert.deepEqual(broken.history(), []);
+});
+
+test('the person is known from the panel before anything of the room is read, so the list the app is answered with does not write them', async () => {
+  const run = load({ storage: makeStorage({ [MEMBERS_KEY]: JSON.stringify({ room: 'elsewhere', self: 5, t: Date.now(), members: [] }) }) });
+  const socket = run.connect();
+  socket.deliver('open');
+  socket.answer(1, ROSTER);                                   // ROSTER has a member with id 5: the person
+  assert.deepEqual(kinds(run).slice(1).map(k => k[1]), ['路人乙', '离线丙'], 'the owner of the list is the person: not "somebody already there"');
+});
+
+test('a connection that drops and comes back to the same room does not write the people already in it again', async () => {
+  const run = load();
+  const first = run.connect();
+  first.deliver('open');
+  first.answer(1, ROSTER);
+  first.deliver('close');
+  const second = run.connect();                               // the app comes back, and asks for the room again
+  second.deliver('open');
+  second.answer(1, ROSTER);
+  await sleep(250);
+  assert.deepEqual(kinds(run).map(k => k[0]), ['me-in', 'here', 'here', 'here'], 'the same three, once');
+});
+
+// --- the panel half: what it copies for main.js ------------------------------------------------------------
+
+// The page's components, as far as the plugin looks at them: the room's props are on one of them, a level or two down.
+function roomTree(props) {
+  const room = { props, subTree: null, isUnmounted: false };
+  return { room, tree: { _instance: { vnode: { component: { props: {}, subTree: { children: [{ children: [{ component: { props: { other: 1 }, subTree: null } }, { component: room }] }] } } } } } };
+}
+
+const PROPS = () => ({
+  currentRoomId: 'ROOM1',
+  localMemberId: 99,
+  roomMembers: [
+    { id: 99, nickname: '我自己', isOwner: false, online: true, left: 1, top: 2 },
+    { id: 1, nickname: '房主', isOwner: true, online: true },
+    { id: 2, nickname: '掉线的', isOwner: false, online: false },
+  ],
+});
+
+test('the panel half copies who is in the room, with the room number and the person\'s own id, for main.js', async () => {
+  const { room, tree } = roomTree(PROPS());
+  const panel = loadPanel(null, { vue: tree });
+  const written = () => JSON.parse(panel.storage.data[MEMBERS_KEY]);
+
+  assert.deepEqual({ ...written(), t: undefined }, {
+    room: 'ROOM1', self: 99, t: undefined,
+    members: [{ id: 99, name: '我自己', owner: false, online: true }, { id: 1, name: '房主', owner: true, online: true }, { id: 2, name: '掉线的', owner: false, online: false }],
+  }, 'only what is needed: no positions, no animation state');
+  assert.ok(Math.abs(written().t - Date.now()) < 2000);
+
+  const first = written().t;
+  await sleep(100);
+  assert.equal(written().t, first, 'not written again while nothing changes');
+  await sleep(300);
+  assert.ok(written().t > first, 'but written again after a while, so that it is known to be current');
+
+  room.props.roomMembers = [...room.props.roomMembers, { id: 3, nickname: '新来的', isOwner: false, online: true }];
+  await sleep(100);
+  assert.deepEqual(written().members.map(m => m.id), [99, 1, 2, 3], 'a change is copied at the next look');
+
+  room.props.currentRoomId = '';
+  room.props.roomMembers = [];
+  await sleep(100);
+  assert.deepEqual([written().room, written().members], ['', []], 'leaving the room is copied too, so that an old list is not left');
+});
+
+test('when the page has no room component, or it goes away, nothing is written and nothing breaks; when the plugin stops the copy goes', async () => {
+  const none = loadPanel(null, { vue: { _instance: { vnode: { component: { props: {}, subTree: null } } } } });
+  await sleep(100);
+  assert.equal(none.storage.data[MEMBERS_KEY], undefined);
+
+  const noApp = loadPanel(null);
+  await sleep(100);
+  assert.equal(noApp.storage.data[MEMBERS_KEY], undefined);
+
+  const { room, tree } = roomTree(PROPS());
+  const panel = loadPanel(null, { vue: tree });
+  assert.ok(panel.storage.data[MEMBERS_KEY]);
+  room.isUnmounted = true;                                    // the page was rebuilt: it is looked for again
+  room.props = { get currentRoomId() { throw new Error('gone'); }, roomMembers: [] };
+  await sleep(100);                                           // reading it throws: that is not allowed to escape
+  panel.dispose();
+  assert.equal(panel.storage.data[MEMBERS_KEY], undefined, 'the copy is removed when the plugin stops');
+});
+
+// --- started again in the same room ------------------------------------------------------------------------
+
+test('turned off and on, or reloaded, in the middle of a room, the people already written down are not written down again', () => {
+  const snapshot = () => ({ room: 'LATE', self: 99, t: Date.now(), members: people });
+  const first = loadLate({ snapshot: snapshot() });
+  first.socket.send('2');
+  assert.equal(first.history().length, 2);
+
+  first.dispose();                                            // what a reload, or the master switch, does
+  first.storage.data[MEMBERS_KEY] = JSON.stringify(snapshot());
+  const again = loadLate({ reuse: first });
+  again.socket.send('2');
+  again.say(snapshot());
+  assert.equal(again.history().length, 2, 'the same two, once');
+
+  again.say({ ...snapshot(), members: [...people, { id: 4, name: '后来的', owner: false, online: true }] });
+  assert.deepEqual(again.history().map(e => e.name), ['房主', '掉线的', '后来的'], 'but somebody who was not there before is');
+});
+
+test('somebody written down as offline who the panel now says is online came back, once', () => {
+  const late = loadLate({ snapshot: { room: 'LATE', self: 99, t: Date.now(), members: people } });
+  late.socket.send('2');
+  late.say({ room: 'LATE', self: 99, t: Date.now(), members: people.map(m => (m.id === 2 ? { ...m, online: true } : m)) });
+  assert.deepEqual(late.history().map(e => [e.type, e.name]), [['here', '房主'], ['here', '掉线的'], ['online', '掉线的']]);
+  late.say({ room: 'LATE', self: 99, t: Date.now(), members: people.map(m => (m.id === 2 ? { ...m, online: true } : m)) });
+  assert.equal(late.history().length, 3, 'and not again');
+});
+
+test('a room that was left and is entered again has its people written again: it is another time there', async () => {
+  const run = load();
+  const first = run.connect();
+  first.deliver('open');
+  first.answer(1, ROSTER);
+  first.deliver('close');
+  await sleep(300);                                           // gone for good: the leaving is written
+  const second = run.connect();
+  second.deliver('open');
+  second.answer(1, ROSTER);
+  assert.deepEqual(kinds(run).map(k => k[0]), ['me-in', 'here', 'here', 'here', 'me-out', 'me-in', 'here', 'here', 'here']);
+});
+
+test('somebody told about with no nickname gets it from the panel\'s list, not "玩家 <id>"', () => {
+  const late = loadLate({ snapshot: { room: 'LATE', self: 99, t: Date.now() - 120_000, members: people } });   // too old to be believed as a list...
+  late.socket.send('2');
+  assert.deepEqual(late.history(), []);
+  late.storage.data[MEMBERS_KEY] = JSON.stringify({ room: 'LATE', self: 99, t: Date.now(), members: people });   // ...and now current
+  late.socket.frame('rc', { a: 1, b: 1, c: 1, d: '', o: 0 });                   // details with no nickname
+  assert.equal(late.history()[0].name, '房主');
+});
+
+test('started again, an event about somebody already written down is not written down again either', () => {
+  const first = loadLate({ snapshot: { room: 'LATE', self: 99, t: Date.now(), members: [] } });
+  first.socket.send('2');
+  first.socket.frame('rc', { a: 1, n: '房主', b: 1, c: 1, d: '', o: 0 });           // told by an event, as one already there
+  assert.deepEqual(first.history().map(e => e.type), ['here']);
+
+  first.dispose();
+  const again = loadLate({ reuse: first });
+  again.socket.send('2');
+  again.socket.frame('rc', { a: 1, n: '房主', b: 1, c: 1, d: '', o: 0 });
+  assert.deepEqual(again.history().map(e => e.type), ['here'], 'the same one, once');
+});
+
+test('started again, a change since the last time is written: back online, or gone offline', () => {
+  const first = loadLate({ snapshot: { room: 'LATE', self: 99, t: Date.now(), members: people } });
+  first.socket.send('2');                                     // 房主 online, 掉线的 offline
+  assert.deepEqual(first.history().map(e => [e.type, e.name]), [['here', '房主'], ['here', '掉线的']]);
+
+  first.dispose();
+  const flipped = people.map(m => (m.id === 1 ? { ...m, online: false } : m.id === 2 ? { ...m, online: true } : m));
+  first.storage.data[MEMBERS_KEY] = JSON.stringify({ room: 'LATE', self: 99, t: Date.now(), members: flipped });
+  const again = loadLate({ reuse: first });
+  again.socket.send('2');
+  assert.deepEqual(again.history().slice(2).map(e => [e.type, e.name]), [['offline', '房主'], ['online', '掉线的']]);
+});
+
+test('started again while somebody is offline, as the last thing written of them says, nothing is written', () => {
+  const online = { room: 'LATE', self: 99, t: Date.now(), members: [{ id: 1, name: '房主', owner: true, online: true }] };
+  const first = loadLate({ snapshot: online });
+  first.socket.send('2');
+  first.socket.frame('ro', { a: 1 });                          // went offline: written as that
+  assert.deepEqual(first.history().map(e => e.type), ['here', 'offline']);
+
+  first.dispose();
+  first.storage.data[MEMBERS_KEY] = JSON.stringify({ ...online, t: Date.now(), members: [{ id: 1, name: '房主', owner: true, online: false }] });
+  const again = loadLate({ reuse: first });
+  again.socket.send('2');
+  assert.deepEqual(again.history().map(e => e.type), ['here', 'offline'], 'still offline: no news');
 });

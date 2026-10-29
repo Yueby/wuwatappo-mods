@@ -16,7 +16,10 @@
 // and who is in a room when the app comes into it is not an event: it is the answer to the app's own
 // request for the room (an acknowledgement, `43<number>[…]`):
 //     {c: 0, d: {r: room number, m: [{u: id, n: nickname, o: 1 if the owner, l: 1 if online}, …]}}
-// Those are the ones "already there". A plugin that starts while the app is in a room has missed that answer.
+// Those are the ones "already there". A plugin that starts while the app is in a room has missed that answer,
+// and the app is not asked again (that would be calling the server on its behalf). What is there to read is the
+// app's own panel, which holds the same list for the 联机 page: panel.js copies it, with the room number and
+// the person's own id, into localStorage under MEMBERS_KEY, and this reads it from there (see reconcile).
 // (`rc` with a text `a`, "95007|99051", is who pressed a key, and `rc` with only `a` and `o` is something
 // else again: neither says who is in the room.) A leave names an id and not a nickname, so the nickname is
 // remembered from when the person came in.
@@ -27,13 +30,16 @@
 // sets its handlers, or, for one that was already open when this started, at its next ping.
 
 const STORE = 'modkit-room-history';
+const MEMBERS_KEY = 'modkit-room-history-members';   // written by panel.js: { room, self, members: [{ id, name, owner, online }], t }
+const FRESH_MS = 30_000;          // a copy of the panel's list older than this is not believed (see panel.js, which refreshes it)
 const SETTLE_MS = 3000;           // the people already in a room are told to a newcomer in its first moments: they were there, they did not come in
 const LEAVE_GRACE_MS = 8000;      // a connection that drops and comes back to the same room is not leaving it
 
 let alive = true;
 const taps = new WeakMap();       // socket -> what is known of the room it is for
 let current = null;               // the session whose room is shown on the MOD page
-let pendingLeave = null;          // { room, timer }: the room the person has just lost the connection to
+let pendingLeave = null;          // { room, timer, at, members }: the room the person has just lost the connection to
+let selfId = 0;                   // the person's own id, once the panel has said it: they are in the room, they are not "somebody"
 
 const proto = WebSocket.prototype;
 const originals = { send: proto.send };
@@ -68,12 +74,29 @@ function record(entry) {
   showCount(list);
 }
 
-// The last nickname this id had, from this session or the history.
+// The last nickname this id had: from this session, the panel's list of the room, or the history.
 function nameOf(session, id) {
   const known = session.members.get(id)?.name;
   if (known) return known;
+  const panel = Array.isArray(snapshotOf()?.members) ? snapshotOf().members.find(member => idOf(member?.id) === id && typeof member.name === 'string' && member.name.trim()) : null;
+  if (panel) return panel.name.trim();
   const before = read().reverse().find(entry => entry.id === id && entry.name);
   return before?.name ?? `玩家 ${id}`;
+}
+
+// What the history last says of somebody in a room, in the visit that is going on: the record, or null when
+// there is none (they were not written down, or the visit it was about is over, or it has not begun).
+// This is what lets a plugin that is started again, or turned off and on, in the middle of a room, not write
+// the same people down as "already there" a second time.
+function lastOf(room, id) {
+  const list = read();
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const entry = list[i];
+    if (entry?.room !== room) continue;
+    if (entry.type === 'me-in' || entry.type === 'me-out' || entry.type === 'dismiss') return null;
+    if (entry.id === id) return entry;
+  }
+  return null;
 }
 
 // --- what a frame says ----------------------------------------------------------------------------------
@@ -141,6 +164,7 @@ function cannotRead(event, payload) {
 function seen(session, event, payload) {
   const id = idOf(payload?.a);
   if (!id) return cannotRead(event, payload);
+  if (id === selfId) return;                          // "I came in" is written when the connection opens
   const name = nameIn(payload);
   const member = session.members.get(id);
 
@@ -155,7 +179,39 @@ function seen(session, event, payload) {
 
   session.members.set(id, { name, online: true });
   const already = Date.now() - session.since < SETTLE_MS || (event === 'rc' && session.adopted);
+  if (already && ['here', 'join', 'online'].includes(lastOf(session.room, id)?.type)) return;   // written already, before this was started again
   record({ room: session.room, type: already ? 'here' : 'join', id, name: name || nameOf(session, id) });
+}
+
+// Somebody who is in the room and was not seen coming in: they were there. Not the person themselves.
+function admit(session, id, name, { owner, online }) {
+  if (!id || id === selfId) return;
+  const known = session.members.get(id);
+  if (known) {                                         // told already, by an event or an earlier list
+    if (name) known.name = name;
+    if (online && known.online === false) {            // the list says they are back
+      known.online = true;
+      record({ room: session.room, type: 'online', id, name: known.name || nameOf(session, id) });
+    }
+    return;
+  }
+  session.members.set(id, { name, online });
+  // Written down already, before this was started again? Then only what has changed since is news.
+  const before = lastOf(session.room, id);
+  if (before && ['here', 'join', 'online', 'offline'].includes(before.type)) {
+    const wasOffline = before.type === 'offline' || before.offline === true;
+    if (online && wasOffline) record({ room: session.room, type: 'online', id, name: name || nameOf(session, id) });
+    else if (!online && !wasOffline) record({ room: session.room, type: 'offline', id, name: name || nameOf(session, id) });
+    return;
+  }
+  record({
+    room: session.room,
+    type: 'here',
+    id,
+    name: name || nameOf(session, id),
+    ...(owner ? { owner: true } : {}),
+    ...(online ? {} : { offline: true }),
+  });
 }
 
 // The answer to the app's request for the room: everybody who is in it. They were there; nobody came in.
@@ -170,22 +226,30 @@ function roster(session, answer) {
       cannotRead('名单', member);
       continue;
     }
-    const name = nameIn(member);
-    const known = session.members.get(id);
-    if (known) {                                       // told already, by an event
-      if (name) known.name = name;
-      continue;
-    }
-    const online = member.l === 1 || member.l === true;
-    session.members.set(id, { name, online });
-    record({
-      room: session.room,
-      type: 'here',
-      id,
-      name: name || nameOf(session, id),
-      ...(member.o === 1 || member.o === true ? { owner: true } : {}),
-      ...(online ? {} : { offline: true }),
-    });
+    admit(session, id, nameIn(member), { owner: member.o === 1 || member.o === true, online: member.l === 1 || member.l === true });
+  }
+}
+
+// What the panel holds of the room: the people in it, as the app shows them. It is the way to know who was
+// there when this started in the middle of a room. Only believed for the room this connection is for, and
+// when it is recent; whoever is already known is left as they are.
+function snapshotOf() {
+  try {
+    const snap = JSON.parse(localStorage.getItem(MEMBERS_KEY));
+    return snap && typeof snap === 'object' ? snap : null;
+  } catch {
+    return null;
+  }
+}
+
+function reconcile(session) {
+  const snap = snapshotOf();
+  const self = idOf(snap?.self);
+  if (self) selfId = self;
+  if (!session?.room || !snap || snap.room !== session.room || !Array.isArray(snap.members)) return;
+  if (!(Date.now() - Number(snap.t) <= FRESH_MS)) return;
+  for (const member of snap.members) {
+    admit(session, idOf(member?.id), typeof member?.name === 'string' ? member.name.trim() : '', { owner: member?.owner === true, online: member?.online !== false });
   }
 }
 
@@ -206,12 +270,14 @@ function handle(session, { event, payload }) {
     sample(event, payload);
     const id = idOf(payload?.a);
     if (!id) return cannotRead(event, payload);
+    if (id === selfId) return;
     record({ room: session.room, type: 'leave', id, name: nameOf(session, id) });
     session.members.delete(id);
   } else if (event === 'ro') {
     sample(event, payload);
     const id = idOf(payload?.a);
     if (!id) return cannotRead(event, payload);
+    if (id === selfId) return;
     const member = session.members.get(id);
     if (member?.online === false) return;             // told twice: nothing to say
     if (member) member.online = false;
@@ -243,6 +309,7 @@ function opened(session) {
   show(session);
   if (pendingLeave?.room === session.room) {          // the same room again: it was a dropped connection
     clearTimeout(pendingLeave.timer);
+    session.members = pendingLeave.members;           // the same people: the list that comes again is not them coming in
     pendingLeave = null;
     return;
   }
@@ -264,7 +331,7 @@ function closed(session) {
   if (current === session) show(null);
   if (pendingLeave?.room !== session.room) settleLeave();      // another room's leaving that is still waiting: its wait is over
   clearTimeout(pendingLeave?.timer);
-  const pending = { room: session.room, timer: null, at: Date.now() };
+  const pending = { room: session.room, timer: null, at: Date.now(), members: session.members };
   pending.timer = setTimeout(() => {
     if (pendingLeave === pending) pendingLeave = null;
     if (alive) record({ t: pending.at, room: pending.room, type: 'me-out' });
@@ -286,7 +353,10 @@ function tap(socket, open = false) {
   });
   socket.addEventListener('close', () => { if (alive) closed(session); });
   if (open) {
-    if (session.room) show(session);                           // it is not a coming in: it was there already
+    if (session.room) {                                        // it is not a coming in: it was there already
+      show(session);
+      reconcile(session);
+    }
   } else {
     socket.addEventListener('open', () => { if (alive) opened(session); });
   }
@@ -309,9 +379,11 @@ proto.send = function send(...args) {
   return originals.send.apply(this, args);
 };
 
-// The panel can clear the history; the count shown has to follow.
+// The panel can clear the history, and has the list of who is in the room: the count shown has to follow,
+// and the list is read when it changes.
 const onStorage = event => {
   if (event.key === STORE || event.key === null) showCount(read());
+  if (alive && (event.key === MEMBERS_KEY || event.key === null)) reconcile(current);
 };
 window.addEventListener('storage', onStorage);
 
@@ -325,5 +397,6 @@ mod.onDispose(() => {
   }
 });
 
+reconcile(null);                                    // only to learn who the person is, if the panel has said
 showCount(read());
 mod.live('room', '不在房间里');

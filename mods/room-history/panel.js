@@ -2,12 +2,20 @@
 // main.js into localStorage (STORE), which every window shares; this only reads it, and draws again when
 // the main window has written to it (the `storage` event is what another window's write looks like).
 //
+// It also does what only this window can: the app's panel holds the list of who is in the room it is in (the 联机
+// page is drawn from it), with their ids, the room number and the person's own id. A copy goes into localStorage
+// under MEMBERS_KEY, for main.js, which writes the history: when the plugin starts in the middle of a room, this
+// is how the ones already in it are known. It is read from the page's own data, not asked of the server.
+//
 // The records are one line per thing that happened. What a person wants is by room: so they are gathered
 // into visits, a visit being the time between coming into a room and leaving it. One row for each, the
 // newest first: the room number, when, how many people, how long; with 复制 for the number and 展开 for what
 // happened in it, which is one row per record, with how long the person stayed on the one that left.
 
 const STORE = 'modkit-room-history';
+const MEMBERS_KEY = 'modkit-room-history-members';
+const POLL_MS = 2000;              // how often the panel's list is looked at
+const REFRESH_MS = 10_000;         // and written again even if it has not changed: main.js does not believe an old copy
 const VISITS = 30;                 // rooms in the dialog; the records of the rest are kept, and counted on the first row
 
 const TEXT = {
@@ -204,16 +212,76 @@ function soon() {
   timer = setTimeout(draw, 150);
 }
 
+// The component of the panel that has the room's props (MainModulePanel: roomMembers, currentRoomId,
+// localMemberId, ...), found by walking the page's components, and kept until it is gone.
+let roomView = null;
+function findRoomView() {
+  const app = document.querySelector('#app')?.__vue_app__;
+  const seen = new Set();
+  const walk = (vnode, depth) => {
+    if (!vnode || typeof vnode !== 'object' || depth > 80) return null;
+    const component = vnode.component;
+    if (component && !seen.has(component)) {
+      seen.add(component);
+      if (component.props && 'roomMembers' in component.props && 'currentRoomId' in component.props) return component;
+      const inner = walk(component.subTree, depth + 1);
+      if (inner) return inner;
+    }
+    if (Array.isArray(vnode.children)) {
+      for (const child of vnode.children) {
+        const found = walk(child, depth + 1);
+        if (found) return found;
+      }
+    }
+    return vnode.suspense ? walk(vnode.suspense.activeBranch, depth + 1) : null;
+  };
+  return walk(app?._instance?.vnode ?? app?._container?._vnode, 0);
+}
+
+function membersNow(view) {
+  const props = view.props;
+  const list = Array.isArray(props.roomMembers) ? props.roomMembers : [];
+  return {
+    room: typeof props.currentRoomId === 'string' ? props.currentRoomId.trim() : '',
+    self: Number(props.localMemberId) > 0 ? Number(props.localMemberId) : 0,
+    members: list
+      .filter(member => member && Number(member.id) > 0)
+      .map(member => ({ id: Number(member.id), name: typeof member.nickname === 'string' ? member.nickname : '', owner: member.isOwner === true, online: member.online !== false })),
+  };
+}
+
+let publishedText = '';
+let publishedAt = 0;
+function publish() {
+  try {
+    if (!roomView || roomView.isUnmounted) roomView = findRoomView();
+    if (!roomView) return;
+    const text = JSON.stringify(membersNow(roomView));
+    const now = Date.now();
+    if (text === publishedText && now - publishedAt < REFRESH_MS) return;
+    publishedText = text;
+    publishedAt = now;
+    localStorage.setItem(MEMBERS_KEY, JSON.stringify({ ...JSON.parse(text), t: now }));
+  } catch (err) {
+    roomView = null;                                           // look again next time
+  }
+}
+
 const onStorage = event => {
   if (event.key === STORE || event.key === null) soon();
 };
 window.addEventListener('storage', onStorage);
 
+const publishing = setInterval(publish, POLL_MS);
+
 mod.onDispose(() => {
+  clearInterval(publishing);
+  localStorage.removeItem(MEMBERS_KEY);
   clearTimeout(timer);
   window.removeEventListener('storage', onStorage);
   removers.forEach(remove => remove());
   removers = [];
 });
 
+publish();
 draw();
