@@ -95,8 +95,11 @@ function load({ config = {}, storage = makeStorage() } = {}) {
     addEventListener: (type, fn) => listeners.push([type, fn]),
     removeEventListener: (type, fn) => { const at = listeners.findIndex(l => l[0] === type && l[1] === fn); if (at >= 0) listeners.splice(at, 1); },
   };
+  const before = { send: WebSocket.prototype.send };
+  for (const name of ['onopen', 'onmessage', 'onclose']) before[name] = Object.getOwnPropertyDescriptor(WebSocket.prototype, name);
   new AsyncFunction('mod', 'WebSocket', 'localStorage', 'window', source)(mod, WebSocket, storage, window);
   const run = {
+    before,
     mod, WebSocket, storage, live, logs, warnings, settings, window, listeners,
     dispose: () => disposers.forEach(fn => fn()),
     history: () => JSON.parse(storage.data['modkit-room-history'] ?? '[]'),
@@ -119,7 +122,9 @@ test('it only listens: the one permission is the clipboard (for 复制), no netw
   assert.deepEqual(manifest.modkit.permissions, ['clipboard']);
   assert.equal(manifest.modkit.host, undefined, 'no Node part');
   const code = (mainSource + panelSource).replace(/\/\/.*$/gm, '');
-  assert.ok(!/fetch\(|XMLHttpRequest|invoke\(|new WebSocket|\.emit\(/.test(code), 'it does not send or call anything');
+  assert.ok(!/fetch\(|XMLHttpRequest|new WebSocket|\.emit\(/.test(code), 'it does not send or call anything');
+  const calls = [...code.matchAll(/invoke\(([^,)]*)/g)].map(match => match[1].trim());
+  assert.deepEqual(calls, ["'plugin:window|is_visible'"], 'the one command it asks the app is whether the panel is shown: a question, not an action');
   assert.equal((code.match(/clipboard/g) ?? []).length, 1, 'the clipboard is used in one place, and only to write the room number');
   assert.match(code, /clipboard\.writeText\(visit\.room\)/);
   assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['room', 'count', 'max']);
@@ -383,7 +388,7 @@ test('the leaving is dated when the connection was lost, not when the wait for a
 
 const at = (day, h, m, s = 0) => new Date(2026, 9, day, h, m, s).getTime();
 
-function loadPanel(entries, { here = null, clipboard = { writes: [], fails: false }, vue = null } = {}) {
+function loadPanel(entries, { here = null, clipboard = { writes: [], fails: false }, vue = null, shown = null } = {}) {
   const storage = makeStorage(entries ? { 'modkit-room-history': typeof entries === 'string' ? entries : JSON.stringify(entries) } : {});
   const rows = [];
   let redraws = 0;
@@ -391,6 +396,7 @@ function loadPanel(entries, { here = null, clipboard = { writes: [], fails: fals
   const mod = {
     entry: def => { rows.push(def); return () => rows.splice(rows.indexOf(def), 1); },
     onDispose: fn => { disposers.push(fn); running.push({ dispose: fn }); },
+    ...(shown ? { invoke: async (command, args) => { shown.asked.push([command, args]); if (shown.fails) throw new Error('no'); return shown.open; } } : {}),
   };
   const listeners = [];
   const live = new Map([['room-history', new Map(here ? [['room', here]] : [])]]);
@@ -848,4 +854,193 @@ test('what the plugin shows is not spoken: no 我, 咱, 您, 你, 他, 她 in th
   for (const text of [...shown.filter(Boolean), ...strings]) {
     assert.ok(!/[我咱您你她]|(?<!其)他/.test(text.replace(/我自己|我勒个豆/g, '')), `a person word in "${text}"`);
   }
+});
+
+// --- found by the review ------------------------------------------------------------------------------------
+
+test('the panel closed: its list is not copied as if it were current, what was copied is marked old once, and it is copied again when it is open', async () => {
+  const { room, tree } = roomTree(PROPS());
+  const shown = { open: true, fails: false, asked: [] };
+  const panel = loadPanel(null, { vue: tree, shown });
+  await sleep(60);
+  const written = () => JSON.parse(panel.storage.data[MEMBERS_KEY]);
+  assert.equal(written().members.length, 3, 'open: copied');
+  assert.deepEqual(shown.asked[0], ['plugin:window|is_visible', { label: 'panel' }], 'asks the panel window, and only that');
+
+  shown.open = false;                                         // the panel is closed: the app stops telling it
+  await sleep(100);
+  assert.deepEqual([written().t, written().members, written().self, written().room], [0, [], 99, 'ROOM1'], 'marked old; who the person is stays');
+
+  room.props.roomMembers = [];                                // whatever the frozen panel holds changes or not
+  const old = panel.storage.data[MEMBERS_KEY];
+  await sleep(400);
+  assert.equal(panel.storage.data[MEMBERS_KEY], old, 'nothing is written while it is closed, however long');
+
+  shown.open = true;
+  room.props.roomMembers = PROPS().roomMembers;
+  await sleep(100);
+  assert.equal(written().members.length, 3, 'open again: copied again');
+  assert.ok(written().t > 0);
+});
+
+test('if the window cannot be asked whether the panel is shown, it is taken as open', async () => {
+  const { tree } = roomTree(PROPS());
+  const panel = loadPanel(null, { vue: tree, shown: { open: false, fails: true, asked: [] } });
+  await sleep(60);
+  assert.equal(JSON.parse(panel.storage.data[MEMBERS_KEY]).members.length, 3);
+});
+
+test('a copy of the panel\'s list does not bring back somebody who was seen leaving', async () => {
+  const snapshot = () => ({ room: 'LATE', self: 99, t: Date.now(), members: [{ id: 1, name: '房主', owner: true, online: true }] });
+  const late = loadLate({ snapshot: snapshot() });
+  late.socket.send('2');
+  late.socket.frame('rl', { a: 1 });
+  assert.deepEqual(late.history().map(e => e.type), ['here', 'leave']);
+  late.say(snapshot());                                       // the panel, closed since, still has them
+  assert.deepEqual(late.history().map(e => e.type), ['here', 'leave'], 'not "here" again');
+  await sleep(150);                                           // past the first moments after it was picked up
+  late.socket.frame('rj', { a: 1, n: '房主' });               // but if they come back, the connection says so
+  assert.deepEqual(late.history().map(e => e.type), ['here', 'leave', 'join']);
+});
+
+test('a room that is closed has its end written once: the connection that ends with it is not a leaving as well', async () => {
+  const run = load();
+  const socket = run.connect();
+  socket.deliver('open');
+  socket.frame('rs', { r: 'V3f9IQD1f' });
+  socket.deliver('close');
+  await sleep(300);
+  assert.deepEqual(kinds(run).map(k => k[0]), ['me-in', 'dismiss']);
+});
+
+test('a room closed message for another room is ignored, as the app ignores it', () => {
+  const run = load();
+  const socket = run.connect();
+  socket.deliver('open');
+  socket.frame('rs', { r: 'SOMEWHERE-ELSE' });
+  assert.deepEqual(kinds(run).map(k => k[0]), ['me-in']);
+  socket.frame('rs', { r: 'V3f9IQD1f' });
+  assert.deepEqual(kinds(run).map(k => k[0]), ['me-in', 'dismiss']);
+});
+
+test('tries to come back that never open are not leavings, and the one leaving is dated at the loss', async () => {
+  const run = load();
+  const first = run.connect();
+  first.deliver('open');
+  const lost = Date.now();
+  first.deliver('close');
+  await sleep(40);
+  for (let i = 0; i < 3; i += 1) {                            // the app tries again and again; none gets through
+    const attempt = run.connect();
+    attempt.deliver('close');
+    await sleep(20);
+  }
+  await sleep(300);
+  const outs = run.history().filter(entry => entry.type === 'me-out');
+  assert.equal(outs.length, 1, 'one leaving');
+  assert.ok(outs[0].t - lost < 30, 'dated at the loss, not at the last try');
+
+  const refused = load();
+  const never = refused.connect(ROOM_URL('NEVER'));
+  never.deliver('close');
+  await sleep(300);
+  assert.deepEqual(refused.history(), [], 'a room that was never entered is not left');
+});
+
+test('the person themselves, once the panel has said who they are, is taken out of what was written before', () => {
+  const storage = makeStorage({
+    'modkit-room-history': JSON.stringify([
+      { t: 1, room: 'R', type: 'me-in' },
+      { t: 2, room: 'R', type: 'here', id: 99, name: '我自己' },
+      { t: 3, room: 'R', type: 'here', id: 1, name: '别人' },
+      { t: 4, room: 'R', type: 'join', id: 99, name: '我自己' },
+    ]),
+    [MEMBERS_KEY]: JSON.stringify({ room: 'R', self: 99, t: 0, members: [] }),
+  });
+  const run = load({ storage });
+  assert.deepEqual(run.history().map(e => [e.type, e.id ?? null]), [['me-in', null], ['here', 1]]);
+  assert.equal(run.live.count, '2 条');
+});
+
+test('what the app calls details is read as the app reads it: a number for the id, "a" and "o" alone is something else', () => {
+  const run = load();
+  const socket = run.connect();
+  socket.deliver('open');
+  socket.frame('rc', { a: 5 });                              // a number and nothing else: details, with no nickname
+  socket.frame('rc', { a: 6, o: 1 });                        // a and o and nothing else: not details
+  socket.frame('rc', { a: '7', n: '按键' });                  // text: who pressed a key
+  socket.frame('rj', { a: '8', n: '文本编号' });              // the app cannot read an rj with a text id either
+  assert.deepEqual(kinds(run).map(k => k[0]), ['me-in', 'here']);
+  assert.equal(run.history()[1].id, 5);
+  assert.match(run.warnings.join('\n'), /没能读懂 rj/);
+});
+
+test('a damaged record in the history does not stop a leave from being written', () => {
+  const run = load({ storage: makeStorage({ 'modkit-room-history': JSON.stringify([{ t: 1, room: 'R', type: 'join', id: 3, name: '丙' }, null, 5]) }) });   // the damaged ones are the newest: they are looked at first
+  const socket = run.connect();
+  socket.deliver('open');
+  assert.doesNotThrow(() => socket.frame('rl', { a: 3 }));
+  assert.equal(run.history().at(-1).type, 'leave');
+  assert.equal(run.history().at(-1).name, '丙');
+});
+
+test('the window closing ends what is open at once: there is no time for the wait', async () => {
+  const run = load();
+  const socket = run.connect();
+  socket.deliver('open');
+  for (const [type, fn] of run.listeners) if (type === 'pagehide') fn({});
+  assert.deepEqual(kinds(run).map(k => k[0]), ['me-in', 'me-out'], 'written at once');
+  socket.deliver('close');                                    // and the close that follows is not a second one
+  await sleep(300);
+  assert.deepEqual(kinds(run).map(k => k[0]), ['me-in', 'me-out']);
+
+  const waiting = load();
+  const second = waiting.connect();
+  second.deliver('open');
+  second.deliver('close');                                    // a leaving that is waiting out its grace
+  for (const [type, fn] of waiting.listeners) if (type === 'pagehide') fn({});
+  assert.deepEqual(waiting.history().map(e => e.type), ['me-in', 'me-out'], 'the wait is cut short');
+});
+
+test('switched off, WebSocket is as it was: send, onopen, onmessage, onclose; and a leaving that was waiting is not written afterwards', async () => {
+  const run = load();
+  const proto = run.WebSocket.prototype;
+  const socket = run.connect();
+  socket.deliver('open');
+  socket.deliver('close');                                    // waiting out the grace
+  run.dispose();
+  assert.equal(proto.send, run.before.send, 'send is the original function');
+  for (const name of ['onopen', 'onmessage', 'onclose']) {
+    const now = Object.getOwnPropertyDescriptor(proto, name);
+    assert.equal(now.get, run.before[name].get, `${name}: the original getter`);
+    assert.equal(now.set, run.before[name].set, `${name}: the original setter`);
+  }
+  await sleep(300);
+  assert.deepEqual(kinds(run).map(k => k[0]), ['me-in'], 'the timer does not write after the plugin is off');
+});
+
+test('the dialog: a room closed and then "left" by its connection is one visit, and a leaving written twice is one', () => {
+  const panel = loadPanel([
+    { t: at(29, 9, 0), room: 'DDD', type: 'me-in' },
+    { t: at(29, 9, 30), room: 'DDD', type: 'dismiss' },
+    { t: at(29, 9, 30, 8), room: 'DDD', type: 'me-out' },       // what older versions wrote after a dismiss
+    { t: at(29, 10, 0), room: 'EEE', type: 'me-in' },
+    { t: at(29, 10, 20), room: 'EEE', type: 'me-out' },
+    { t: at(29, 10, 20, 5), room: 'EEE', type: 'me-out' },
+  ]);
+  assert.deepEqual(panel.titles().filter(t => t.startsWith('房间号')), ['房间号 EEE', '房间号 DDD'], 'two rooms, two rows');
+  assert.equal(panel.row('房间号 DDD').description, '10-29 09:00:00 到 09:30:00 · 待了 30 分钟 · 房间被解散');
+});
+
+test('how long and until when: across midnight, in hours, and under a minute', () => {
+  const panel = loadPanel([
+    { t: at(29, 23, 50), room: 'A', type: 'me-in' }, { t: at(30, 0, 20), room: 'A', type: 'me-out' },
+    { t: at(30, 1, 0), room: 'B', type: 'me-in' }, { t: at(30, 3, 30), room: 'B', type: 'me-out' },
+    { t: at(30, 4, 0), room: 'C', type: 'me-in' }, { t: at(30, 7, 0), room: 'C', type: 'me-out' },
+    { t: at(30, 8, 0), room: 'D', type: 'me-in' }, { t: at(30, 8, 0, 20), room: 'D', type: 'me-out' },
+  ]);
+  assert.equal(panel.row('房间号 A').description, '10-29 23:50:00 到 10-30 00:20:00 · 待了 30 分钟', 'the other day is written in full');
+  assert.equal(panel.row('房间号 B').description, '10-30 01:00:00 到 03:30:00 · 待了 2 小时 30 分钟');
+  assert.equal(panel.row('房间号 C').description, '10-30 04:00:00 到 07:00:00 · 待了 3 小时');
+  assert.equal(panel.row('房间号 D').description, '10-30 08:00:00 到 08:00:20 · 待了 不到 1 分钟');
 });

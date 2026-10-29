@@ -9,9 +9,10 @@
 // is not ready the app shows a countdown there; when it is ready it shows `button.reward-btn` inside
 // `.reward-anchor--left` / `.reward-anchor--right`. Pressing it asks the server to open the chest, with the
 // click count the app has, and the server decides what it costs and what it gives. The app is busy while
-// it goes on (the button is `disabled`, `aria-busy`, or `reward-btn--loading`), and afterwards the button is
-// gone, replaced by the next countdown. If the click count is not enough the app says so in a toast and the
-// button stays.
+// it goes on (the button is `disabled`; `aria-busy` and `reward-btn--loading` are checked as well), and
+// afterwards the button is gone, replaced by the next countdown. If the press does not go through (the click
+// count is not enough, the server says no, the app is being updated) the app says so in a toast and the button
+// stays: what the reason is, is in the toast, not here.
 //
 // While a chest is not ready the app shows its countdown (`.reward-countdown`, with the time left as its
 // aria-label, "29:07"): that is what the state line on the MOD page tells, so that waiting looks like waiting.
@@ -29,13 +30,16 @@ const SIDES = [['right', '上面'], ['left', '下面']];
 const POLL_MS = 250;              // how often it looks while the app is opening a chest
 const SETTLE_MS = 30_000;         // the longest it waits for the app to be done with one
 const NOTHING_HAPPENED_MS = 2000; // a press the app does not even start on has been ignored
-const RETRY_MS = 60_000;          // after a chest that would not open, how long before that side is tried again
+const RETRY_MS = 60_000;          // after a chest that would not open, how long before that side is tried again,
+const MAX_RETRY_MS = 600_000;     // and twice as long each time it still does not, up to this
+const REST_SLICE_MS = 1000;       // the wait between two looks is taken in pieces this long, so that a changed setting applies at once
 const LOGIN_WAIT_MS = 5000;
 
 let opened = 0;           // chests opened since this mod loaded
 let timer = null;
 let alive = true;         // false once this copy has been stopped
 const holdUntil = { left: 0, right: 0 };
+const refusals = { left: 0, right: 0 };    // in a row, for each side
 
 const sleep = ms => new Promise(resolve => { timer = setTimeout(resolve, ms); });
 const loggedIn = () => !!localStorage.getItem('wuwatappo-login-cuid');
@@ -45,8 +49,9 @@ const busy = button => button.disabled || button.getAttribute('aria-busy') === '
 const showOpened = () => mod.live('opened', `${opened} 个`);
 
 // Press the chest on one side, and say what came of it: 'none' (no button, or the app is busy),
-// 'opened' (the app took it and the button is gone), or 'refused' (it is still there and idle: not enough
-// clicks, or the server said no).
+// 'opened' (the app took it and the button is gone), or 'refused' (it is still there and idle: the press did
+// not go through). A press the app is still busy with after SETTLE_MS is not said to be refused: it is 'none',
+// and looked at again at the next look.
 async function press(side) {
   const button = buttonOf(side);
   if (!button || busy(button)) return 'none';
@@ -65,13 +70,24 @@ async function press(side) {
       return 'refused';
     }
   }
-  return alive ? 'refused' : 'none';
+  return 'none';
+}
+
+// The wait between two looks. The setting is read as it goes, so that a shorter interval applies at once and
+// not after the old one is over.
+async function rest() {
+  const from = Date.now();
+  while (alive) {
+    const left = mod.config.get('interval') * 1000 - (Date.now() - from);
+    if (left <= 0) return;
+    await sleep(Math.min(left, REST_SLICE_MS));
+  }
 }
 
 // What the state says while there is nothing to open: when the next one can be, if the app shows it.
 function waitingText() {
-  const left = SIDES.filter(([side]) => mod.config.get(side)).map(([side, name]) => [name, countdownOf(side)]).filter(([, time]) => time);
-  return left.length ? `下一个箱子：${left.map(([name, time]) => `${name} ${time}`).join('，')}` : '等箱子可以开';
+  const counting = SIDES.filter(([side]) => mod.config.get(side)).map(([side, name]) => [name, countdownOf(side)]).filter(([, time]) => time);
+  return counting.length ? `下一个箱子：${counting.map(([name, time]) => `${name} ${time}`).join('，')}` : '等箱子可以开';
 }
 
 async function run() {
@@ -94,18 +110,21 @@ async function run() {
       if (!alive) return;
       if (result === 'opened') {
         opened += 1;
+        refusals[side] = 0;
         did = true;
         mod.log(`开了${name}的箱子`);
         showOpened();
       } else if (result === 'refused') {
-        holdUntil[side] = Date.now() + RETRY_MS;
+        refusals[side] += 1;
+        const wait = Math.min(RETRY_MS * 2 ** (refusals[side] - 1), MAX_RETRY_MS);
+        holdUntil[side] = Date.now() + wait;
         held = name;
-        mod.warn(`${name}的箱子没有开成（点击数可能不够），${RETRY_MS / 1000} 秒后再试`);
+        mod.warn(`${name}的箱子没有开成，${wait / 1000} 秒后再试`);
       }
     }
 
     mod.live('state', held ? `${held}的箱子没开成，稍后再试` : did ? '刚开了一个箱子' : waitingText());
-    await sleep(mod.config.get('interval') * 1000);
+    await rest();
   }
 }
 

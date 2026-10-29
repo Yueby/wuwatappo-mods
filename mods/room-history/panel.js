@@ -1,6 +1,7 @@
 // Room history, the page half: the list in the plugin's settings dialog. The history itself is written by
-// main.js into localStorage (STORE), which every window shares; this only reads it, and draws again when
-// the main window has written to it (the `storage` event is what another window's write looks like).
+// main.js into localStorage (STORE), which every window shares; this reads it, and draws again when the main
+// window has written to it (the `storage` event is what another window's write looks like). The one thing it
+// writes there itself is 清空, which empties it.
 //
 // It also does what only this window can: the app's panel holds the list of who is in the room it is in (the 联机
 // page is drawn from it), with their ids, the room number and the person's own id. A copy goes into localStorage
@@ -68,10 +69,12 @@ function read() {
 function visitsOf(list) {
   const visits = [];
   const open = new Map();                                      // room -> its visit that has not ended
+  const ended = new Set();                                     // rooms whose latest visit has ended
   const begin = (entry, known) => {
     const visit = { room: entry.room, start: entry.t, end: null, known, dismissed: false, events: [], first: new Map(), people: new Set() };
     visits.push(visit);
     open.set(entry.room, visit);
+    ended.delete(entry.room);
     return visit;
   };
 
@@ -81,10 +84,12 @@ function visitsOf(list) {
       begin(entry, true);
       continue;
     }
+    if (entry.type === 'me-out' && !open.has(entry.room) && ended.has(entry.room)) continue;   // left twice: a room that was closed, or whose leaving was written again
     const visit = open.get(entry.room) ?? begin(entry, false);
     if (entry.type === 'me-out') {
       visit.end = entry.t;
       open.delete(entry.room);
+      ended.add(entry.room);
       continue;
     }
 
@@ -104,6 +109,7 @@ function visitsOf(list) {
       visit.end = entry.t;
       visit.dismissed = true;
       open.delete(entry.room);
+      ended.add(entry.room);
     }
   }
   return visits.sort((a, b) => b.start - a.start);
@@ -174,6 +180,7 @@ function eventRow(event) {
   };
 }
 
+// (Each row added or taken away says the page has changed; the MOD page draws once for all of them.)
 function draw() {
   removers.forEach(remove => remove());
   removers = [];
@@ -252,10 +259,43 @@ function membersNow(view) {
 
 let publishedText = '';
 let publishedAt = 0;
-function publish() {
+let publishing = false;
+
+// What was copied while the panel was open is marked old when it is closed, so that main.js does not take it
+// for the room as it is now. Who the person is stays: that does not go out of date.
+function markOld() {
+  try {
+    const copy = JSON.parse(localStorage.getItem(MEMBERS_KEY));
+    if (copy) localStorage.setItem(MEMBERS_KEY, JSON.stringify({ ...copy, members: [], t: 0 }));
+  } catch {
+    // nothing was copied, or it is not readable: nothing to mark
+  }
+}
+
+async function publish() {
+  if (publishing) return;
+  publishing = true;
   try {
     if (!roomView || roomView.isUnmounted) roomView = findRoomView();
     if (!roomView) return;
+
+    // The app only sends the room to the panel while the panel is open. Closed, what the panel holds is the room as
+    // it was when it was closed, and copying it again and again would make it look current.
+    let open = true;
+    try {
+      open = (await mod.invoke('plugin:window|is_visible', { label: 'panel' })) !== false;
+    } catch {
+      // the window cannot be asked: taken as open, as it was before this was asked
+    }
+    if (!open) {
+      if (publishedAt) {
+        publishedAt = 0;
+        publishedText = '';
+        markOld();
+      }
+      return;
+    }
+
     const text = JSON.stringify(membersNow(roomView));
     const now = Date.now();
     if (text === publishedText && now - publishedAt < REFRESH_MS) return;
@@ -264,6 +304,8 @@ function publish() {
     localStorage.setItem(MEMBERS_KEY, JSON.stringify({ ...JSON.parse(text), t: now }));
   } catch (err) {
     roomView = null;                                           // look again next time
+  } finally {
+    publishing = false;
   }
 }
 
@@ -272,10 +314,10 @@ const onStorage = event => {
 };
 window.addEventListener('storage', onStorage);
 
-const publishing = setInterval(publish, POLL_MS);
+const watching = setInterval(publish, POLL_MS);
 
 mod.onDispose(() => {
-  clearInterval(publishing);
+  clearInterval(watching);
   localStorage.removeItem(MEMBERS_KEY);
   clearTimeout(timer);
   window.removeEventListener('storage', onStorage);

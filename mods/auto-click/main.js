@@ -7,8 +7,10 @@
 //
 // How the app handles events (read from the 1.0.2 main-window bundle):
 //   * `global-clap-mouse` (and `gamepad-button-press`): one event is one click. The handler
-//     counts it and plays the pet's paw animation, alternating left and right, and nothing
-//     else: no payload is read, no matching release is expected, no duration is measured.
+//     counts it and plays the pet's paw animation, alternating left and right. While the person is in a
+//     room the app also tells the room about the click, as it does for a real one (the members see
+//     the paw), at the rate set here. No payload is read, no matching release is expected, no
+//     duration is measured.
 //   * `key-press` / `key-release` are different: the paw goes down on press and is put back
 //     at once on release, and the click is only counted on the release. A press and release
 //     sent together therefore count but show no animation, and a press without its release
@@ -45,6 +47,7 @@ async function loop() {
     const started = Date.now();
     try {
       await click();
+      if (!alive) return;                                 // switched off while it was on its way: nothing more is shown
       sent += 1;
     } catch (err) {
       if (!alive) return;
@@ -53,7 +56,7 @@ async function loop() {
       showSent();
       return;                                             // switch it off and on again to start over
     }
-    if (sent % 10 === 0) showSent();                      // keep the counter moving without a message per click
+    if (sent <= 10 || sent % 10 === 0) showSent();        // the first ones one by one, then every tenth: no message per click
 
     // The interval is from one click to the next, so the time spent sending counts.
     const rest = mod.config.get('interval') - (Date.now() - started);

@@ -1,8 +1,8 @@
 {
   "name": "auto-click",
   "displayName": "自动点击",
-  "version": "0.5.0",
-  "description": "开着的时候，按设定的间隔自动点击桌宠，增加点击数",
+  "version": "0.5.1",
+  "description": "开着的时候，按设定的间隔自动点击桌宠，增加点击数；在房间里时，房间里的人也会看到每一次点击",
   "author": "Yueby",
   "modkit": {
     "defaultEnabled": false,
