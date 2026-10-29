@@ -97,10 +97,29 @@ function nameIn(payload) {
   return typeof payload?.n === 'string' && payload.n.trim() ? payload.n.trim() : '';
 }
 
+// The log (the MOD page's 日志) is how a difference between what this mod expects and what the app sends
+// is found: the first message of each kind is written as it came, and one that cannot be read is said so,
+// a few times and not more.
+const shown = new Set();
+let unclear = 0;
+const MAX_UNCLEAR = 10;
+const excerpt = payload => { try { return JSON.stringify(payload).slice(0, 200); } catch { return String(payload); } };
+
+function sample(event, payload) {
+  if (shown.has(event)) return;
+  shown.add(event);
+  mod.log(`第一次收到 ${event}：${excerpt(payload)}`);
+}
+
+function cannotRead(event, payload) {
+  unclear += 1;
+  if (unclear <= MAX_UNCLEAR) mod.warn(`没能读懂 ${event}：${excerpt(payload)}${unclear === MAX_UNCLEAR ? '（后面的不再提示）' : ''}`);
+}
+
 // Somebody the room has told about: new, or one already known whose details came again.
 function seen(session, event, payload) {
   const id = idOf(payload?.a);
-  if (!id) return;
+  if (!id) return cannotRead(event, payload);
   const name = nameIn(payload);
   const member = session.members.get(id);
 
@@ -120,25 +139,31 @@ function seen(session, event, payload) {
 
 function handle(session, { event, payload }) {
   if (event === 'rj') {
+    sample(event, payload);
     seen(session, event, payload);
   } else if (event === 'rc') {
     // Only the form that carries a member's details: not who pressed a key ("a" as text), not the one with
     // nothing but `a` and `o`.
     if (payload && typeof payload === 'object' && typeof payload.a !== 'string' && Object.keys(payload).some(key => key !== 'a' && key !== 'o')) {
+      sample(event, payload);
       seen(session, event, payload);
     }
   } else if (event === 'rl') {
+    sample(event, payload);
     const id = idOf(payload?.a);
-    if (!id) return;
+    if (!id) return cannotRead(event, payload);
     record({ room: session.room, type: 'leave', id, name: nameOf(session, id) });
     session.members.delete(id);
   } else if (event === 'ro') {
+    sample(event, payload);
     const id = idOf(payload?.a);
+    if (!id) return cannotRead(event, payload);
     const member = session.members.get(id);
-    if (!id || member?.online === false) return;      // told twice, or somebody never seen: nothing to say
+    if (member?.online === false) return;             // told twice: nothing to say
     if (member) member.online = false;
     record({ room: session.room, type: 'offline', id, name: nameOf(session, id) });
   } else if (event === 'rs') {
+    sample(event, payload);
     record({ room: session.room, type: 'dismiss' });
     session.members.clear();
   }
@@ -170,13 +195,14 @@ function opened(session) {
   record({ room: session.room, type: 'me-in' });
 }
 
-// The leaving of the room the connection was lost to, written now instead of when the wait is over.
+// The leaving of the room the connection was lost to, written now instead of when the wait is over. It is
+// dated when the connection was lost, not when the wait ended: that is when the person was gone.
 function settleLeave() {
   if (!pendingLeave) return;
-  const { room, timer } = pendingLeave;
+  const { room, timer, at } = pendingLeave;
   clearTimeout(timer);
   pendingLeave = null;
-  record({ room, type: 'me-out' });
+  record({ t: at, room, type: 'me-out' });
 }
 
 function closed(session) {
@@ -184,10 +210,10 @@ function closed(session) {
   if (current === session) show(null);
   if (pendingLeave?.room !== session.room) settleLeave();      // another room's leaving that is still waiting: its wait is over
   clearTimeout(pendingLeave?.timer);
-  const pending = { room: session.room, timer: null };
+  const pending = { room: session.room, timer: null, at: Date.now() };
   pending.timer = setTimeout(() => {
     if (pendingLeave === pending) pendingLeave = null;
-    if (alive) record({ room: pending.room, type: 'me-out' });
+    if (alive) record({ t: pending.at, room: pending.room, type: 'me-out' });
   }, LEAVE_GRACE_MS);
   pendingLeave = pending;
 }
