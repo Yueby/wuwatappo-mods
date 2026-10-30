@@ -1,35 +1,54 @@
-# wuwatappo-mods
+# Wuwa Tappo 插件仓库
 
-The plugin registry for [wuwatappo-modkit](https://github.com/Yueby/wuwatappo-modkit), the mod loader for
-Wuwa Tappo. The launcher lists what is here and installs it for you (the 插件 window of the launcher, and the
-安装 button on the MOD page of the app's settings); you can also unpack a plugin's folder into `mods\` by hand.
+中文 · [English](README.en.md)
 
-Plugins here are reviewed by hand before they are merged, but **a plugin is somebody's code running with the
-rights of your account** (a plugin with a Node part can read your files and use the network; a page script runs
-inside the app's windows). The launcher shows what a plugin declares and asks before it installs one.
+[Wuwa Tappo 插件加载器](https://github.com/Yueby/wuwatappo-modkit)用的插件仓库。启动器会列出这里的插件，点一下就装好，不用自己下载。
 
-## What is here
+## 现有插件
+
+| 插件 | 做什么 | 默认 | 声明的权限 |
+|---|---|---|---|
+| **自动点击** | 按设定的间隔自动点击桌宠，增加点击数。在房间里时，房间里的人也会看到每一次点击 | 关闭 | 无 |
+| **自动开箱子** | 宝箱可以开的时候自动点开（开箱子要消耗点击数）。上面、下面两个宝箱可以分别开关 | 关闭 | 无 |
+| **房间历史** | 按房间记录进入和离开的玩家，带房间号、时间和待了多久，只保存在这台电脑上 | 开启 | 读写剪贴板（只在点“复制”时，写入房间号） |
+
+会替玩家操作账号的插件默认关闭，需要在 MOD 页自己打开。每个插件怎么用，见[加载器的说明](https://github.com/Yueby/wuwatappo-modkit#各插件怎么用)。
+
+## 怎么安装
+
+先按[加载器的说明](https://github.com/Yueby/wuwatappo-modkit#安装)装好加载器，然后任选一种：
+
+- 软件设置面板里的 **MOD** 页，右上角点 **安装**；
+- 或者启动器窗口里点 **插件…**。
+
+选中插件，看清它声明的内容，点 **安装**，马上生效，不用重启软件。有新版本时按钮会变成 **更新**。
+
+## 关于安全
+
+仓库里的插件在合并前都由人工看过，规则见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。但**插件是别人写的代码，运行时拥有软件窗口里能做的一切**（带后台程序的插件还能读写文件、使用网络），所以：
+
+- 装之前，启动器会显示插件声明的权限、有没有后台程序，并询问；
+- 每个版本发布后不会被替换，改动一定是新版本；下载的文件会和仓库登记的校验值核对，对不上就丢弃；
+- 只安装信得过的插件。发现某个插件做了它没说过的事，请到 Issues 反馈，它会被移出仓库。
+
+## 目录
 
 ```
-mods/<id>/            one folder per plugin: package.json, its scripts
-scripts/build.mjs     checks every plugin, packs each version, writes the index (the workflows run it)
-.github/workflows/    validate (pull requests) and publish (after a merge)
+mods/<id>/            每个插件一个文件夹：package.json 和它的脚本
+tests/                插件的测试（对着软件的替身运行，不碰任何账号）
+scripts/build.mjs     检查每个插件、打包每个版本、写出列表（工作流会运行它）
+.github/workflows/    validate（拉取请求）和 publish（合并之后）
 ```
 
-After a merge, automation makes a release `<id>-v<version>` for each plugin version that has none, with the
-plugin as a zip, and replaces `index.json` on the release called `index`. That file is what the launcher reads:
-for each plugin its name, version, what it declares, where its zip is and the zip's SHA-256. A zip that does not
-match is thrown away. A released version is never replaced; a fix is a new version.
+合并之后，自动化会给每个还没发布过的插件版本做一个名为 `<id>-v<版本>` 的发布，附上插件的 zip，并更新名为 `index` 的发布里的 `index.json`。启动器读的就是这个文件：每个插件的名字、版本、声明的内容、zip 的地址和 SHA-256。
 
-## Sending a plugin
+---
 
-1. Fork, add `mods/<id>/` (the folder name is the plugin's id: letters, digits, `.`, `_`, `-`), open a pull request.
-2. A plugin is a folder with a `package.json` the way [docs/MODDING.md](https://github.com/Yueby/wuwatappo-modkit/blob/main/docs/MODDING.md)
-   describes. The registry also needs `version` (like `1.0.0`) and `description` (what the list shows), and no
-   `node_modules` (list `dependencies` instead; they are fetched when it is installed).
-3. The `validate` check runs the launcher's own reader over it. Run the same yourself:
-   `modkit.exe mods check mods\<id> --registry`
-4. Changing a plugin means raising its `version` in the same pull request.
+# 参与开发：投稿一个插件
 
-A plugin comes with a test when it does something that needs one (`tests/`, run by `npm test`, against a stand-in for the app).
-What a reviewer looks for is in [CONTRIBUTING.md](CONTRIBUTING.md). Read it before you write the plugin, not after.
+1. Fork，在 `mods/<id>/` 下加插件（文件夹名就是插件的 id：字母、数字、`.`、`_`、`-`），提交拉取请求。
+2. 插件是一个带 `package.json` 的文件夹，写法见[加载器的 docs/MODDING.md](https://github.com/Yueby/wuwatappo-modkit/blob/main/docs/MODDING.md)（英文）。仓库另外要求有 `version`（例如 `1.0.0`）和 `description`（列表里显示的说明），并且不能带 `node_modules`（把依赖写进 `dependencies`，安装时会下载）。
+3. `validate` 检查会用启动器自己的读取方式检查一遍。本地也可以跑同样的检查：`modkit.exe mods check mods\<id> --registry`。
+4. 改动一个插件，要在同一个拉取请求里升它的 `version`。
+
+做了需要测试的事，就带上测试（放 `tests/`，用 `npm test` 运行，对着软件的替身，不要碰真实账号）。审核的人看什么，写在 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）里，请在写插件之前读，而不是之后。显示给玩家的文字写成标签和陈述，不要用“我、您、他”这类人称。
