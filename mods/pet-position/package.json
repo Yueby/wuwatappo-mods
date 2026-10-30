@@ -1,8 +1,8 @@
 {
   "name": "pet-position",
   "displayName": "记住桌宠位置",
-  "version": "0.1.0",
-  "description": "记住最后一次亲手拖好的桌宠位置；重启软件或进房间后位置被挤动时，自动拖回去",
+  "version": "0.2.0",
+  "description": "记住自己和房间里其他玩家的桌宠最后一次亲手拖好的位置；重启软件或进房间后位置被挤动时，自动拖回去",
   "author": "Yueby",
   "modkit": {
     "windows": { "main": "main.js", "panel": "panel.js" },
@@ -12,6 +12,13 @@
         "type": "toggle",
         "title": "位置被挤动后拖回去",
         "description": "关掉以后只保住软件存下的位置（重启时有用），不会在软件运行中移动桌宠",
+        "default": true
+      },
+      {
+        "key": "others",
+        "type": "toggle",
+        "title": "也记住其他玩家的桌宠",
+        "description": "房间里其他玩家的桌宠，拖到哪里就记住哪里，下次进房间时拖回去（只在这台电脑上，不会发给房间）",
         "default": true
       },
       { "key": "remembered", "type": "value", "title": "记住的位置", "default": "还没有" },
