@@ -224,14 +224,19 @@ let sectionStop = null;
 let sectionStyle = null;
 
 const SECTION_CSS = `
-.wrh-section { margin-top: 26px; padding-bottom: 24px; }
-.wrh-section .room-members { margin-top: 14px; max-height: 330px; overflow-y: auto; padding-right: 4px; }
+/* The page is a column, and the list takes what is left of its height, so that it is the list that scrolls and not the page. */
+.room-module .panel-content { display: flex; flex-direction: column; }
+.room-module .panel-content > :not(.wrh-section) { flex: 0 0 auto; }
+.wrh-section { flex: 1 1 0; min-height: 190px; display: flex; flex-direction: column; margin-top: 22px; padding-bottom: 22px; }
+.wrh-section .room-info { flex: 0 0 auto; }
+.wrh-section .room-members { flex: 1 1 0; min-height: 0; margin-top: 14px; overflow-y: auto; padding-right: 4px; }
 .wrh-section .room-members li { height: auto; min-height: 36px; padding: 5px 20px; gap: 12px; flex-wrap: wrap; }
 .wrh-section .room-members .room-member-name { width: 200px; }
 .wrh-info { flex: 1; min-width: 160px; font-size: 15px; color: rgb(142, 123, 106); }
 .wrh-event { background: transparent !important; min-height: 28px !important; padding-left: 44px !important; }
 .wrh-event .room-member-name { width: 300px; font-size: 16px !important; white-space: nowrap; }
-.wrh-event .wrh-info { flex: 0 0 auto; min-width: 0; }
+.wrh-event .wrh-info { flex: 1; min-width: 0; }
+.wrh-event .wrh-info:last-child { flex: 0 0 150px; text-align: right; }
 .wrh-btn { border: 1px solid rgb(231, 183, 124); background: rgb(254, 210, 145); color: rgb(142, 94, 67); border-radius: 14px; height: 26px; padding: 0 12px; font: inherit; font-size: 15px; cursor: pointer; }
 .wrh-btn:disabled { opacity: .5; cursor: default; }
 .wrh-empty { font-size: 16px; color: rgb(142, 123, 106); }
@@ -269,7 +274,7 @@ async function enterRoom(visit, node) {
 }
 
 function sectionRows(visits, here) {
-  const list = el('ul', 'room-members');
+  const list = el('ul', 'room-members common-scrollbar2');      // the app's own scrollbar
   if (!visits.length) {
     const row = el('li');
     row.append(el('span', 'wrh-empty', '还没有记录，进入房间后会按房间整理在这里'));

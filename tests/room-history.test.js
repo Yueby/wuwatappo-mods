@@ -1110,7 +1110,9 @@ test('the 联机 page gets the list, under the members: one row for each room, f
   assert.equal(header.className, 'room-info');
   assert.equal(header.children[0].textContent, '房间历史');
   assert.equal(header.children[1].textContent, '共 2 个房间，9 条记录');
-  assert.equal(list.className, 'room-members');
+  assert.equal(list.className, 'room-members common-scrollbar2', 'the own list and scrollbar classes of the app');
+  assert.match(page.sheets.join(''), /.wrh-section .room-members {[^}]*overflow-y: auto/, 'it is the list that scrolls');
+  assert.match(page.sheets.join(''), /.room-module .panel-content { display: flex; flex-direction: column; }/, 'in a column that gives it the rest of the height');
   const rows = list.children;
   assert.equal(rows.length, 2, 'both closed: one row each, the newest first');
   assert.equal(rows[0].children[0].textContent, '房间号 BBB');
