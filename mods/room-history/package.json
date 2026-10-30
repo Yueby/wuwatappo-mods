@@ -1,11 +1,12 @@
 {
   "name": "room-history",
   "displayName": "房间历史",
-  "version": "0.5.0",
-  "description": "按房间记录进入和离开的玩家，带房间号、时间和待了多久，只保存在这台电脑上",
+  "version": "0.6.0",
+  "description": "按房间记录进入和离开的玩家，带房间号、时间和待了多久，只保存在这台电脑上；联机页里直接看，也能从那里再进一次房间",
   "author": "Yueby",
   "modkit": {
-    "permissions": ["clipboard"],
+    "api": 4,
+    "permissions": ["clipboard", "page", "app-commands"],
     "windows": { "main": "main.js", "panel": "panel.js" },
     "settings": [
       { "key": "room", "type": "value", "title": "当前房间号", "default": "不在房间里" },

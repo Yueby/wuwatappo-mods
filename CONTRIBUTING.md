@@ -7,7 +7,7 @@ write and what to leave out.
 
 - `description` says what the plugin does, in a sentence. What it shows on the MOD page matches what it does.
 - `modkit.permissions` lists what it uses. Use these words, which people are shown in plain Chinese: `files` (读写文件),
-  `network` (联网), `clipboard` (读写剪贴板), `run` (运行其他程序), `app-internals` (读取并改动应用内部状态: `mod.app`, with `"api": 2`; the loader then loads the main window once more at each start, so a plugin asks for it only for what it cannot do otherwise); any other word is shown as written. Nothing enforces it, so it is checked
+  `network` (联网), `clipboard` (读写剪贴板), `run` (运行其他程序), `page` (往应用的页面里加内容、改页面样式), `app-commands` (向应用发出命令), `app-state` (读取应用的账号和点击数等数据), `app-internals` (读取并改动应用内部状态: `mod.app`, with `"api": 2`; the loader then loads the main window once more at each start, so a plugin asks for it only for what it cannot do otherwise); any other word is shown as written. Nothing enforces it, so it is checked
   against the code: a plugin that talks to the network and does not say so is not merged.
 - A plugin that sends anything off the machine says to whom and what, in its description.
 

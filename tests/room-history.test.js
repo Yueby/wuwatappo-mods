@@ -119,7 +119,8 @@ function load({ config = {}, storage = makeStorage() } = {}) {
 const kinds = run => run.history().map(entry => [entry.type, entry.name ?? null, entry.room ?? null]);
 
 test('it only listens: the one permission is the clipboard (for 复制), no network, no call of the app, and the history stays here', () => {
-  assert.deepEqual(manifest.modkit.permissions, ['clipboard']);
+  assert.deepEqual(manifest.modkit.permissions, ['clipboard', 'page', 'app-commands']);
+  assert.equal(manifest.modkit.api, 4);
   assert.equal(manifest.modkit.host, undefined, 'no Node part');
   const code = (mainSource + panelSource).replace(/\/\/.*$/gm, '');
   assert.ok(!/fetch\(|XMLHttpRequest|new WebSocket|\.emit\(/.test(code), 'it does not send or call anything');
@@ -1043,4 +1044,124 @@ test('how long and until when: across midnight, in hours, and under a minute', (
   assert.equal(panel.row('房间号 B').description, '10-30 01:00:00 到 03:30:00 · 待了 2 小时 30 分钟');
   assert.equal(panel.row('房间号 C').description, '10-30 04:00:00 到 07:00:00 · 待了 3 小时');
   assert.equal(panel.row('房间号 D').description, '10-30 08:00:00 到 08:00:20 · 待了 不到 1 分钟');
+});
+
+// --- the 联机 page ---------------------------------------------------------------------------------------------
+
+// Elements enough for the section: a class, a text, children, listeners, a disabled flag.
+function fakeElement(tag) {
+  return {
+    tag, className: '', textContent: '', disabled: false, type: '', children: [], handlers: [],
+    append(...nodes) { this.children.push(...nodes); },
+    replaceChildren(...nodes) { this.children = nodes; },
+    remove() { this.removed = true; },
+    addEventListener(type, fn) { if (type === 'click') this.handlers.push(fn); },
+    press() { this.handlers.forEach(fn => fn()); },
+    find(predicate) { return [this, ...this.children.flatMap(child => child.find?.(predicate) ?? [])].filter(predicate); },
+    text() { return [this.textContent, ...this.children.map(child => child.text?.() ?? '')].join(' ').replace(/\s+/g, ' ').trim(); },
+  };
+}
+
+function loadPage(entries, { here = null } = {}) {
+  const storage = makeStorage(entries ? { 'modkit-room-history': JSON.stringify(entries) } : {});
+  const commands = [];
+  const mounts = [];
+  const watchers = [];
+  const removed = [];
+  const sheets = [];
+  const disposers = [];
+  const mod = {
+    entry: () => () => {},
+    onDispose: fn => { disposers.push(fn); running.push({ dispose: fn }); },
+    css: text => { sheets.push(text); return () => sheets.splice(sheets.indexOf(text), 1); },
+    app: { action: async (type, payload) => { commands.push({ type, ...payload }); } },
+    page: {
+      onComponent(name, fn) {
+        const watcher = { name, fn, cleanup: null };
+        watchers.push(watcher);
+        return () => { watcher.cleanup?.(); watcher.cleanup = null; };
+      },
+      mount(target, node) { mounts.push({ target, node }); return () => removed.push(target); },
+    },
+  };
+  const window = { modkit: { changed() {}, live: new Map([['room-history', new Map(here ? [['room', here]] : [])]]) }, addEventListener() {}, removeEventListener() {} };
+  const document = { createElement: tag => fakeElement(tag), querySelector: () => null };
+  const navigator = { clipboard: { writeText: () => Promise.resolve() } };
+  new AsyncFunction('mod', 'localStorage', 'window', 'document', 'navigator', panelFast)(mod, storage, window, document, navigator);
+  return {
+    commands, mounts, removed, sheets, watchers, storage,
+    // the app draws the room page: the component appears
+    appears() { const watcher = watchers.find(w => w.name === 'MainPanelRoomTab'); watcher.cleanup = watcher.fn({ name: 'MainPanelRoomTab', el: {}, props: {} }); },
+    section: () => mounts.find(m => m.target === '.room-module .panel-content')?.node,
+    dispose: () => disposers.forEach(fn => fn()),
+  };
+}
+
+test('the 联机 page gets the list, under the members: one row for each room, from the page\'s own classes', () => {
+  const page = loadPage(HISTORY, { here: null });
+  assert.equal(page.watchers.length, 1);
+  assert.equal(page.watchers[0].name, 'MainPanelRoomTab', 'it waits for the page to be drawn');
+  assert.equal(page.mounts.length, 0, 'nothing before then');
+  page.appears();
+  const section = page.section();
+  assert.ok(section, 'mounted into the page\'s content');
+  assert.equal(section.className, 'wrh-section');
+  const [header, list] = section.children;
+  assert.equal(header.className, 'room-info');
+  assert.equal(header.children[0].textContent, '房间历史');
+  assert.equal(header.children[1].textContent, '共 2 个房间，9 条记录');
+  assert.equal(list.className, 'room-members');
+  const rows = list.children;
+  assert.equal(rows.length, 2, 'both closed: one row each, the newest first');
+  assert.equal(rows[0].children[0].textContent, '房间号 BBB');
+  assert.equal(rows[0].children[1].textContent, '10-29 16:00:00 · 1 人 · 没有记录到离开');
+  assert.equal(rows[1].children[0].textContent, '房间号 AAA');
+  assert.equal(rows[1].children[1].textContent, '10-29 14:00:00 到 14:45:00 · 3 人 · 待了 45 分钟');
+  assert.match(page.sheets.join(''), /\.wrh-section/, 'with its own stylesheet');
+});
+
+test('on the 联机 page: 进入 puts the number in the page\'s box and joins, and is not there while the person is in a room', async () => {
+  const out = loadPage(HISTORY, { here: null });
+  out.appears();
+  const row = out.section().children[1].children[1];                       // AAA
+  const enter = row.find(node => node.textContent === '进入')[0];
+  assert.ok(enter, 'a room that is not the one the person is in can be entered');
+  enter.press();
+  await sleep(300);
+  assert.deepEqual(out.commands, [{ type: 'set-room-id-input', value: 'AAA' }, { type: 'join-room' }], 'the number first, then the page\'s own join');
+  assert.equal(enter.textContent, '已发出');
+
+  const inRoom = loadPage(HISTORY, { here: 'BBB' });
+  inRoom.appears();
+  const buttons = inRoom.section().find(node => node.tag === 'button').map(node => node.textContent);
+  assert.ok(!buttons.includes('进入'), 'in a room the page cannot join another');
+  assert.ok(buttons.includes('复制') && buttons.includes('展开'));
+});
+
+test('on the 联机 page: 展开 shows what happened in the room, and 收起 closes it again', () => {
+  const page = loadPage(HISTORY, { here: null });
+  page.appears();
+  const open = () => page.section().children[1].children;
+  const toggle = () => open()[1].find(node => node.textContent === '展开')[0];                   // the row of AAA
+  assert.equal(open().length, 2);
+  toggle().press();
+  assert.ok(open().length > 2, 'the events are rows of their own, under the room');
+  assert.ok(open().some(row => row.className === 'wrh-event' && /小明 离开了房间/.test(row.text())));
+  assert.ok(page.section().find(node => node.textContent === '收起').length >= 1);
+});
+
+test('on the 联机 page: with nothing recorded it says so, and when the page goes or the plugin stops, the section goes', () => {
+  const page = loadPage([], { here: null });
+  page.appears();
+  assert.match(page.section().text(), /还没有记录/);
+  page.watchers[0].cleanup();                                                // the page is drawn away
+  assert.equal(page.removed.length, 1, 'taken out with it');
+  page.dispose();
+  assert.equal(page.sheets.length, 0, 'and its stylesheet');
+  assert.equal(page.section().removed, true);
+});
+
+test('a loader without pages (no mod.page) leaves the list in the plugin\'s dialog as it was', () => {
+  const panel = loadPanel(HISTORY, { here: 'BBB' });
+  assert.deepEqual(panel.titles(), ['清空记录', '房间号 BBB', '　路人 进入了房间', '房间号 AAA']);
 });

@@ -211,6 +211,128 @@ function draw() {
     if (isOpen) [...visit.events].reverse().forEach(event => add(eventRow(event)));
   });
   window.modkit.changed();
+  renderSection();
+}
+
+// --- the 联机 page ------------------------------------------------------------------------------------------------
+// The same list, on the app's own page for rooms (the component MainPanelRoomTab), under the members: it is drawn from
+// the app's own classes (room-info, room-members, ...), so that it looks like part of the page. Only with a loader
+// that has `mod.page` (modkit API 4). Pressing 进入 does what typing the number and pressing the page's own 加入房间 does.
+
+let sectionNode = null;
+let sectionStop = null;
+let sectionStyle = null;
+
+const SECTION_CSS = `
+.wrh-section { margin-top: 26px; padding-bottom: 24px; }
+.wrh-section .room-members { margin-top: 14px; max-height: 330px; overflow-y: auto; padding-right: 4px; }
+.wrh-section .room-members li { height: auto; min-height: 36px; padding: 5px 20px; gap: 12px; flex-wrap: wrap; }
+.wrh-section .room-members .room-member-name { width: 200px; }
+.wrh-info { flex: 1; min-width: 160px; font-size: 15px; color: rgb(142, 123, 106); }
+.wrh-event { background: transparent !important; min-height: 28px !important; padding-left: 44px !important; }
+.wrh-event .room-member-name { width: 300px; font-size: 16px !important; white-space: nowrap; }
+.wrh-event .wrh-info { flex: 0 0 auto; min-width: 0; }
+.wrh-btn { border: 1px solid rgb(231, 183, 124); background: rgb(254, 210, 145); color: rgb(142, 94, 67); border-radius: 14px; height: 26px; padding: 0 12px; font: inherit; font-size: 15px; cursor: pointer; }
+.wrh-btn:disabled { opacity: .5; cursor: default; }
+.wrh-empty { font-size: 16px; color: rgb(142, 123, 106); }
+`;
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function smallButton(label, onClick) {
+  const node = el('button', 'wrh-btn', label);
+  node.type = 'button';
+  node.addEventListener('click', onClick);
+  return node;
+}
+
+// What the person pressed 进入 for: the number goes into the page's room box, and the page's own join does the rest.
+async function enterRoom(visit, node) {
+  node.disabled = true;
+  try {
+    await mod.app.action('set-room-id-input', { value: visit.room });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    await mod.app.action('join-room');
+    node.textContent = '已发出';
+  } catch {
+    node.textContent = '没能进入';
+  }
+  setTimeout(() => {
+    node.textContent = '进入';
+    node.disabled = false;
+  }, 2000);
+}
+
+function sectionRows(visits, here) {
+  const list = el('ul', 'room-members');
+  if (!visits.length) {
+    const row = el('li');
+    row.append(el('span', 'wrh-empty', '还没有记录，进入房间后会按房间整理在这里'));
+    list.append(row);
+    return list;
+  }
+  visits.slice(0, VISITS).forEach((visit, index) => {
+    const isOpen = chosen.has(keyOf(visit)) ? chosen.get(keyOf(visit)) : false;
+    const row = el('li');
+    row.append(el('span', 'room-member-name', `房间号 ${visit.room}`));
+    row.append(el('span', 'wrh-info', visitRow(visit, isOpen, here).description));
+    if (!here && visit.room) {
+      const enter = smallButton('进入', () => enterRoom(visit, enter));
+      row.append(enter);
+    }
+    const copy = smallButton('复制', () => copyRoom(visit, copy));
+    row.append(copy);
+    if (visit.events.length) {
+      row.append(smallButton(isOpen ? '收起' : '展开', () => {
+        chosen.set(keyOf(visit), !isOpen);
+        draw();
+      }));
+    }
+    list.append(row);
+    if (isOpen) {
+      for (const event of [...visit.events].reverse()) {
+        const detail = eventRow(event);
+        const sub = el('li', 'wrh-event');
+        sub.append(el('span', 'room-member-name', detail.title.trim()));
+        sub.append(el('span', 'wrh-info', detail.description));
+        sub.append(el('span', 'wrh-info', detail.value));
+        list.append(sub);
+      }
+    }
+  });
+  return list;
+}
+
+function renderSection() {
+  if (!sectionNode) return;
+  const all = read();
+  const visits = visitsOf(all);
+  const header = el('div', 'room-info');
+  header.append(el('div', 'room-qty', '房间历史'));
+  header.append(el('div', 'room-number', `共 ${visits.length} 个房间，${all.length} 条记录`));
+  sectionNode.replaceChildren(header, sectionRows(visits, currentRoom()));
+}
+
+function startSection() {
+  if (!mod.page) return;
+  sectionStyle = mod.css(SECTION_CSS);
+  sectionNode = el('div', 'wrh-section');
+  sectionStop = mod.page.onComponent('MainPanelRoomTab', () => {
+    renderSection();
+    return mod.page.mount('.room-module .panel-content', sectionNode);
+  });
+}
+
+function stopSection() {
+  sectionStop?.();
+  sectionStyle?.();
+  sectionNode?.remove();
+  sectionNode = null;
 }
 
 // Writes come in bursts (a room full of people arriving): one drawing for all of them.
@@ -323,7 +445,9 @@ mod.onDispose(() => {
   window.removeEventListener('storage', onStorage);
   removers.forEach(remove => remove());
   removers = [];
+  stopSection();
 });
 
 publish();
+startSection();
 draw();
