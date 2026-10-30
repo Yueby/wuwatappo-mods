@@ -11,6 +11,7 @@ The plugin registry for the [Wuwa Tappo plugin loader](https://github.com/Yueby/
 | **自动点击** (Auto click) | Clicks the pet at the interval set, raising the click count. In a room, the people in the room see every click | off | nothing |
 | **自动开箱子** (Auto chest) | Opens a chest when it is ready (opening costs clicks). The upper and the lower chest are switched separately | off | nothing |
 | **房间历史** (Room history) | Records who comes into and leaves a room, with the room number, the time and how long each person stayed. Kept on this computer only | on | the clipboard (only when 复制 is pressed, to write the room number) |
+| **记住桌宠位置** (Pet position) | Remembers where the pet was last dragged to; when a restart or a room moves it, drags it back | on | nothing (it only moves the pet: it sends the same drag events a mouse makes) |
 
 Plugins that act on the account are off after they are installed; they are switched on on the MOD page. How each is used is in [the loader's README](https://github.com/Yueby/wuwatappo-modkit/blob/main/README.en.md#how-each-plugin-is-used).
 
