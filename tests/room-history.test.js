@@ -22,7 +22,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // Waits are seconds long; the constants are replaced, and each has to have been found.
 let source = mainSource;
-for (const [name, value] of Object.entries({ SETTLE_MS: 120, LEAVE_GRACE_MS: 150 })) {
+for (const [name, value] of Object.entries({ SETTLE_MS: 120, LEAVE_GRACE_MS: 150, BEAT_MS: 40, RECONNECT_MS: 600 })) {
   const pattern = new RegExp(`const ${name} = [\\d_]+;`);
   assert.match(source, pattern, `${name} is in the mod`);
   source = source.replace(pattern, `const ${name} = ${value};`);
@@ -1164,4 +1164,101 @@ test('on the 联机 page: with nothing recorded it says so, and when the page go
 test('a loader without pages (no mod.page) leaves the list in the plugin\'s dialog as it was', () => {
   const panel = loadPanel(HISTORY, { here: 'BBB' });
   assert.deepEqual(panel.titles(), ['清空记录', '房间号 BBB', '　路人 进入了房间', '房间号 AAA']);
+});
+
+// --- the app coming back to a room it was in ---------------------------------------------------------------------
+// Seen on the real app: the same room, 12 "stays" in an afternoon. Every time the app was started again, or its page
+// loaded again (an update of a plugin, the loader), the connection to the room was new, and each one began a visit
+// that the one before had no end for.
+
+const ROOM = 'V3f9IQD1f';
+const seeded = (entries, extra = {}) => makeStorage({ 'modkit-room-history': JSON.stringify(entries), ...extra });
+
+test('the app coming back to the room it was just in is the same stay: no second beginning', async () => {
+  const now = Date.now();
+  const storage = seeded([{ t: now - 60_000, room: ROOM, type: 'me-in' }, { t: now - 100, room: ROOM, type: 'here', id: 5, name: '甲' }]);
+  const run = load({ storage });
+  run.connect().deliver('open');
+  await sleep(20);
+  assert.deepEqual(run.history().map(e => e.type), ['me-in', 'here'], 'nothing added: still one stay');
+  assert.equal(run.live.room, ROOM);
+});
+
+test('and the people it is told are in the room are not written as "already there" a second time', async () => {
+  const now = Date.now();
+  const storage = seeded([{ t: now - 60_000, room: ROOM, type: 'me-in' }, { t: now - 100, room: ROOM, type: 'here', id: 5, name: '甲' }]);
+  const run = load({ storage });
+  const socket = run.connect();
+  socket.deliver('open');
+  socket.frame('rc', { a: 5, n: '甲', b: 1, c: 1 });
+  await sleep(20);
+  assert.deepEqual(run.history().map(e => e.type), ['me-in', 'here']);
+});
+
+test('a stay that was not ended and is not come back to in time ended when the person was last seen there', async () => {
+  const now = Date.now();
+  const storage = seeded([{ t: now - 3_600_000, room: ROOM, type: 'me-in' }, { t: now - 3_000_000, room: ROOM, type: 'join', id: 5, name: '甲' }]);
+  const run = load({ storage });
+  run.connect().deliver('open');
+  await sleep(20);
+  const entries = run.history();
+  assert.deepEqual(entries.map(e => e.type), ['me-in', 'join', 'me-out', 'me-in']);
+  assert.equal(entries[2].t, now - 3_000_000, 'ended at the last record of the room: that is the last it is known to be there');
+});
+
+test('the last time the person was seen in the room counts, and not only the last record: a quiet room is not a left one', async () => {
+  const now = Date.now();
+  const storage = seeded([{ t: now - 3_600_000, room: ROOM, type: 'me-in' }], { 'modkit-room-history-alive': JSON.stringify({ room: ROOM, t: now - 150 }) });
+  const run = load({ storage });
+  run.connect().deliver('open');
+  await sleep(20);
+  assert.deepEqual(run.history().map(e => e.type), ['me-in'], 'seen a moment ago: the same stay, though the last record is an hour old');
+});
+
+test('while in a room, the time it was last there is kept', async () => {
+  const run = load();
+  run.connect().deliver('open');
+  await sleep(20);
+  const first = JSON.parse(run.storage.data['modkit-room-history-alive']);
+  assert.equal(first.room, ROOM);
+  await sleep(120);
+  assert.ok(JSON.parse(run.storage.data['modkit-room-history-alive']).t > first.t, 'written again');
+});
+
+test('the app shut and started again: the closing is taken back when it comes to the room again soon', async () => {
+  const first = load();
+  first.connect().deliver('open');
+  await sleep(20);
+  for (const [type, fn] of first.listeners) if (type === 'pagehide') fn();
+  assert.deepEqual(first.history().map(e => e.type), ['me-in', 'me-out']);
+  assert.equal(first.history()[1].closed, true, 'said to be the app shut, not the room left');
+  first.dispose();
+
+  const second = load({ storage: first.storage });
+  second.connect().deliver('open');
+  await sleep(20);
+  assert.deepEqual(second.history().map(e => e.type), ['me-in'], 'one stay');
+});
+
+test('leaving the room and coming in again is two stays, however soon', async () => {
+  const run = load();
+  const socket = run.connect();
+  socket.deliver('open');
+  await sleep(20);
+  socket.deliver('close');
+  await sleep(250);                                          // the wait is over: it was a leaving
+  assert.deepEqual(run.history().map(e => e.type), ['me-in', 'me-out']);
+  assert.equal(run.history()[1].closed, undefined);
+  run.connect().deliver('open');
+  await sleep(20);
+  assert.deepEqual(run.history().map(e => e.type), ['me-in', 'me-out', 'me-in']);
+});
+
+test('another room is another stay: the one it was in is ended', async () => {
+  const now = Date.now();
+  const storage = seeded([{ t: now - 500, room: 'other', type: 'me-in' }]);
+  const run = load({ storage });
+  run.connect().deliver('open');
+  await sleep(20);
+  assert.deepEqual(run.history().map(e => [e.room, e.type]), [['other', 'me-in'], [ROOM, 'me-in']]);
 });

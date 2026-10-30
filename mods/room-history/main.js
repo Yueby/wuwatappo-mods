@@ -36,6 +36,9 @@ const MEMBERS_KEY = 'modkit-room-history-members';   // written by panel.js: { r
 const FRESH_MS = 30_000;          // a copy of the panel's list older than this is not believed (see panel.js, which refreshes it)
 const SETTLE_MS = 3000;           // the people already in a room are told to a newcomer in its first moments: they were there, they did not come in
 const LEAVE_GRACE_MS = 8000;      // a connection that drops and comes back to the same room is not leaving it
+const BEAT_MS = 20_000;           // in a room, the time it was last seen there is written this often (ALIVE_KEY)
+const RECONNECT_MS = 180_000;     // the app coming back to a room within this long of when it was last there is the same stay
+const ALIVE_KEY = 'modkit-room-history-alive';   // { room, t }: the last time the person was seen in a room
 
 let alive = true;
 const taps = new WeakMap();       // socket -> what is known of the room it is for
@@ -79,6 +82,17 @@ function learnSelf(id) {
   }
 }
 
+function writeList(list) {
+  try {
+    localStorage.setItem(STORE, JSON.stringify(list));
+  } catch (err) {
+    mod.warn(`没能保存房间历史：${err.message}`);
+    return false;
+  }
+  showCount(list);
+  return true;
+}
+
 function record(entry) {
   const list = read();
   list.push({ t: Date.now(), ...entry });
@@ -101,6 +115,43 @@ function nameOf(session, id) {
   if (panel) return panel.name.trim();
   const before = read().reverse().find(entry => entry?.id === id && entry.name);
   return before?.name ?? `玩家 ${id}`;
+}
+
+// What the history last says about a stay in a room: its last me-in, me-out or dismiss, and where it is in the list.
+function boundaryOf(room) {
+  const list = read();
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const entry = list[i];
+    if (entry?.room === room && (entry.type === 'me-in' || entry.type === 'me-out' || entry.type === 'dismiss')) return { entry, index: i };
+  }
+  return null;
+}
+
+// The time of the last record of a room, whatever it is.
+function lastRecordAt(room) {
+  const list = read();
+  for (let i = list.length - 1; i >= 0; i -= 1) if (list[i]?.room === room && Number.isFinite(list[i].t)) return list[i].t;
+  return 0;
+}
+
+function readAlive() {
+  try {
+    const alive = JSON.parse(localStorage.getItem(ALIVE_KEY));
+    return alive && typeof alive.room === 'string' && Number.isFinite(alive.t) ? alive : null;
+  } catch {
+    return null;
+  }
+}
+
+// The person is in the room now: said down, so that a stay that was not ended (the app was closed with no time to
+// write it) is known to have lasted until then, and not until the last somebody came or went.
+function beat() {
+  if (!alive || !current?.room || !(current.opened || current.adopted)) return;
+  try {
+    localStorage.setItem(ALIVE_KEY, JSON.stringify({ room: current.room, t: Date.now() }));
+  } catch {
+    // the next beat tries again
+  }
 }
 
 // What the history last says of somebody in a room, in the visit that is going on: the record, or null when
@@ -343,17 +394,37 @@ function opened(session) {
     pendingLeave = null;
     return;
   }
+  // The app comes back to a room the history has the person in, or has just closed on them: it was started again, or
+  // its page was loaded again, and the room is the same. That is the same stay, not one more: it is only the
+  // connection that is new.
+  const last = boundaryOf(session.room);
+  const seen = Math.max(lastRecordAt(session.room), readAlive()?.room === session.room ? readAlive().t : 0);
+  if (last?.entry.type === 'me-in') {
+    if (Date.now() - seen <= RECONNECT_MS) {
+      beat();
+      return;
+    }
+    record({ t: seen, room: session.room, type: 'me-out' });         // the stay it was ended when it was last seen there
+  } else if (last?.entry.type === 'me-out' && last.entry.closed && Date.now() - last.entry.t <= RECONNECT_MS) {
+    const list = read();
+    list.splice(last.index, 1);                                       // the closing of the app is taken back: the room was not left
+    if (writeList(list)) {
+      beat();
+      return;
+    }
+  }
   record({ room: session.room, type: 'me-in' });
+  beat();
 }
 
 // The leaving of the room the connection was lost to, written now instead of when the wait is over. It is
 // dated when the connection was lost, not when the wait ended: that is when the person was gone.
-function settleLeave() {
+function settleLeave(closedByApp = false) {
   if (!pendingLeave) return;
   const { room, timer, at } = pendingLeave;
   clearTimeout(timer);
   pendingLeave = null;
-  record({ t: at, room, type: 'me-out' });
+  record({ t: at, room, type: 'me-out', ...(closedByApp ? { closed: true } : {}) });      // `closed`: the app was shut, which may be taken back if it comes back
 }
 
 function closed(session) {
@@ -390,6 +461,7 @@ function tap(socket, open = false) {
   if (open) {
     if (session.room) {                                        // it is not a coming in: it was there already
       show(session);
+      beat();
       reconcile(session);
     }
   } else {
@@ -426,12 +498,14 @@ window.addEventListener('storage', onStorage);
 const onPageHide = () => {
   if (!alive) return;
   if (current) closed(current);
-  settleLeave();
+  settleLeave(true);
 };
 window.addEventListener('pagehide', onPageHide);
+const beating = setInterval(beat, BEAT_MS);
 
 mod.onDispose(() => {
   alive = false;
+  clearInterval(beating);
   clearTimeout(pendingLeave?.timer);
   window.removeEventListener('storage', onStorage);
   window.removeEventListener('pagehide', onPageHide);
