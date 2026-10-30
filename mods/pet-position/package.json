@@ -1,7 +1,7 @@
 {
   "name": "pet-position",
   "displayName": "记住桌宠位置",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "记住自己和房间里其他玩家的桌宠最后一次亲手拖好的位置；重启软件或进房间后位置被挤动时，自动拖回去",
   "author": "Yueby",
   "modkit": {

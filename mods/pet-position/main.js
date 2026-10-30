@@ -47,6 +47,7 @@ const SETTLE_MS = 1200;           // after a drag ends: the app animates the pet
 const ACCEPT_MS = 2500;           // the app's own saving is let through for this long after the person touched the mouse
 const SETTINGS_ACCEPT_MS = 6000;  // and after the person changed where the pet goes in the app's settings
 const TOLERANCE_PX = 2;
+const DRAG_PX = 4;                // the pointer has to move this far (native pixels) between the press and the release for it to be a drag
 const RETRY_MS = [5000, 15000, 60000, 300000];     // waits after tries that did not bring a pet back
 const GEOMETRY_MS = 10_000;       // how long the window's position and scale are kept
 const GRAB_WAIT_MS = 120;         // after moving the pointer to the pet, before pressing
@@ -63,7 +64,8 @@ let remembered = null;            // { v: 2, layout: { vw, vh, scale }, placemen
 let acceptUntil = 0;
 let lastTouch = 0;                // the last time the person pressed or released a mouse button
 let pressed = false;              // the person is holding a button
-let pressPets = null;             // where the pets were when the person pressed
+let press = null;                 // the pet the person pressed on: { id, pet, pointer }, or null for a press on anything else
+let pointer = null;               // where the person's mouse is, in native pixels
 let emulating = false;            // it is dragging a pet itself
 let ignoreUntil = 0;
 let lastMove = 0;                 // the last time the mouse moved that was not it
@@ -240,32 +242,39 @@ function scheduleSettle(ms, ids) {
   }, ms);
 }
 
-// The pets that are somewhere else than they were when the button went down.
-function movedSince(before, after) {
-  const ids = [];
-  for (const [id, pet] of after) {
-    const was = before.get(id);
-    if (was && !near(pet.cx - was.cx, pet.cy - was.cy)) ids.push(id);
-  }
-  return ids;
+// The pet that is under a point of the screen (native pixels), if any: the person's own, or a player's.
+// The mouse hook is global, so most presses are on something else, and the pets move by themselves while
+// the app arranges them: only a drag that starts on a pet can be the person putting it somewhere.
+function petUnder(point) {
+  if (!point || !geometry) return null;
+  const element = document.elementFromPoint((point.x - geometry.x) / geometry.scale, (point.y - geometry.y) / geometry.scale);
+  if (element?.closest?.('.pet-dock-content')) return ME;
+  const id = element?.closest?.('[data-room-cat-id]')?.dataset?.roomCatId;
+  return id === undefined || id === null || String(id) === ME ? null : String(id);
 }
 
 function onMouseButton(event) {
   if (!alive || emulating || now() < ignoreUntil) return;
-  const { button, action } = event?.payload ?? {};
+  const { button, action, memberId } = event?.payload ?? {};
   lastTouch = now();
   if (button !== 'left') return;
   if (action === 'press') {
     pressed = true;
-    pressPets = readPets();
+    // The hook says whose pet it is for a player's; for the person's own it is what is under the pointer.
+    const id = memberId ? String(memberId) : petUnder(pointer);
+    const pets = readPets();
+    press = id && pets.has(id) && now() - startedAt >= STARTUP_WAIT_MS ? { id, pet: pets.get(id), pointer } : null;
   } else if (action === 'release') {
     pressed = false;
+    const was = press;
+    press = null;
+    if (!was) return;                                        // not on a pet: nothing it did is the person's place
     acceptUntil = now() + ACCEPT_MS;
-    // A drag moves the pet while the button is down, so it has moved by now; a click, or a pet that something else
-    // moves a moment later, has not. Only a drag is a place, and only of the pets that moved.
-    const moved = pressPets ? movedSince(pressPets, readPets()) : [];
-    pressPets = null;
-    if (moved.length) scheduleSettle(SETTLE_MS, moved);
+    // A drag moves the pointer and then the pet along; a click does not, and a pet that something else moves
+    // in the meantime is not the person's doing.
+    const after = readPets().get(was.id);
+    const dragged = pointer && was.pointer && Math.hypot(pointer.x - was.pointer.x, pointer.y - was.pointer.y) > DRAG_PX;
+    if (dragged && after && !near(after.cx - was.pet.cx, after.cy - was.pet.cy)) scheduleSettle(SETTLE_MS, [was.id]);
   }
 }
 
@@ -277,6 +286,7 @@ function onMouseMove(event) {
   const sentAt = sentMoves.get(spot(event?.payload));
   if (sentAt !== undefined && now() - sentAt < SENT_MS) return;        // its own, coming back
   lastMove = now();
+  if (Number.isFinite(event?.payload?.x) && Number.isFinite(event?.payload?.y)) pointer = { x: event.payload.x, y: event.payload.y };
   if (emulating) interrupted = true;
 }
 mod.onEvent('mouse-move', onMouseMove);
@@ -296,7 +306,7 @@ function notify(text) {
 }
 
 async function windowGeometry() {
-  if (geometry && now() - geometry.at < GEOMETRY_MS) return geometry;
+  if (geometry && now() - geometry.at < GEOMETRY_MS) return geometry;       // (an older one is still there for petUnder: the window does not move)
   const [position, scale] = await Promise.all([
     mod.invoke('plugin:window|inner_position', { label: 'main' }),
     mod.invoke('plugin:window|scale_factor', { label: 'main' }),
@@ -388,6 +398,7 @@ async function check() {
   try {
     const pets = readPets();
     if (!pets.has(ME)) return;
+    await windowGeometry().catch(() => {});
     if (!remembered) {
       report('还没有记住位置：把桌宠拖到想要的位置就会记住');
       return;

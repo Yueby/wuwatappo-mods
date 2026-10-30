@@ -206,14 +206,21 @@ function load({ storage = new FakeStorage(), config = {}, extra = {}, appOptions
       const start = { x: c.left + c.width / 2, y: c.top + c.height / 2 };
       const send = (event, payload) => { userEvents.push(event); app.handle(event, payload); (handlers.get(event) ?? []).forEach(fn => fn({ event, id: 0, payload })); };
       send('mouse-move', start);
-      send('mouse-button', { button: 'left', action: 'press' });
+      send('mouse-button', { button: 'left', action: 'press', ...(who === 'me' ? {} : { memberId: Number(who) }) });     // the hook says whose pet a player's is
       await sleep(app.armDelay + 5);
       for (let i = 1; i <= 4; i += 1) { send('mouse-move', { x: start.x + (dx * i) / 4, y: start.y + (dy * i) / 4 }); await sleep(3); }
       send('mouse-button', { button: 'left', action: 'release' });
     },
     // a mouse moving somewhere (not the pet's doing, and not the plugin's): the hook tells the app and the plugin
     wiggle(x = 10, y = 10) { (handlers.get('mouse-move') ?? []).forEach(fn => fn({ event: 'mouse-move', id: 0, payload: { x, y } })); },
-    press() { const c = app.content(); (handlers.get('mouse-button') ?? []).forEach(fn => fn({ payload: { button: 'left', action: 'press' } })); void c; },
+    // the button goes down on a pet (the pointer is moved there first, as the hook does), or, with `where`, somewhere else
+    press(who = 'me', where = null) {
+      const c = who === 'me' ? app.content() : app.friendRect(app.friends.get(String(who)));
+      const at = where ?? { x: c.left + c.width / 2, y: c.top + c.height / 2 };
+      app.pointer = at;
+      (handlers.get('mouse-move') ?? []).forEach(fn => fn({ event: 'mouse-move', id: 0, payload: at }));
+      (handlers.get('mouse-button') ?? []).forEach(fn => fn({ payload: { button: 'left', action: 'press', ...(who === 'me' || where ? {} : { memberId: Number(who) }) } }));
+    },
     release() { (handlers.get('mouse-button') ?? []).forEach(fn => fn({ payload: { button: 'left', action: 'release' } })); },
   };
 
@@ -818,4 +825,88 @@ test('a drag of another player\'s pet does not move the person\'s own, and neith
   await sleep(250);
   assert.deepEqual([run.stored().pets.me.left, run.stored().pets.me.top], [2275, 1011]);
   assert.deepEqual([run.stored().pets['95007'].left, run.stored().pets['95007'].top], [1139, 1081]);
+});
+
+// --- what is not the person putting a pet somewhere --------------------------------------------------------------
+// Found on the real app: it arranges the pets for some seconds after it starts, and the mouse hook is global, so
+// clicks anywhere (a dialog, another program) happened while the pets were moving, and the places they passed were
+// remembered as if they had been dragged there.
+
+const click = async (run, who = 'me', where = null) => {
+  run.person.press(who, where);
+  await sleep(10);
+  run.person.release();
+};
+
+test('clicks that are not on a pet, while the app moves the pets, are not places, and do not let the app\'s saving through', async () => {
+  const storage = new FakeStorage();
+  storage.setItem(STORE, v2({ me: [1489, 1061] }, undefined, placementOf({ left: 1489, top: 1061 })));
+  const run = load({ storage, config: { restore: false }, prepare: withFriends({ 95007: [2377, 1181], 110283: [2219, 1181] }) });
+  await sleep(60);
+  for (let i = 0; i < 5; i += 1) {
+    run.person.press('me', { x: 5, y: 5 });                    // a click on something else, as a dialog's button
+    run.app.place('95007', 2300 - i * 100, 1181);               // and the app arranges the pets meanwhile
+    run.app.place('110283', 2100 - i * 100, 1181);
+    run.app.dock = { left: 1489 + i * 200, top: 1061 };
+    run.person.wiggle(300 + i * 40, 300);                       // the mouse is dragged there, away from the pets
+    run.person.release();
+    await sleep(40);
+  }
+  const kept = run.storage.getItem(PLACEMENT_KEY);
+  run.app.push(0, 0, { save: true });                           // the app saves its own push, right after the last click
+  assert.equal(run.storage.getItem(PLACEMENT_KEY), kept, 'held back, as it is when nothing was touched');
+  await sleep(300);
+  assert.deepEqual(Object.keys(run.stored().pets), ['me'], 'no pet was taken');
+  assert.equal(run.stored().pets.me.left, 1489, 'and the person\'s own place is the one it was');
+});
+
+test('a click on a pet that does not move the pointer is not a place, even if the app moves the pet meanwhile', async () => {
+  const run = load({ prepare: withFriends({ 95007: [1239, 1181] }) });
+  await sleep(60);
+  run.person.press('95007');
+  run.app.place('95007', 800, 700);                             // the app moves it while the button is down
+  run.person.release();
+  await sleep(250);
+  assert.deepEqual(Object.keys(run.stored().pets), ['me']);
+});
+
+test('only the pet that was pressed on is taken, not the others that moved meanwhile', async () => {
+  const run = load({ prepare: withFriends({ 95007: [1239, 1181], 110283: [1111, 1181] }) });
+  await sleep(60);
+  const done = run.person.drag(-400, -300, '95007');
+  await sleep(10);
+  run.app.place('110283', 500, 500);                             // another pet is moved by the app during the drag
+  run.app.dock = { left: 100, top: 100 };
+  await done;
+  await sleep(250);
+  assert.deepEqual(Object.keys(run.stored().pets).sort(), ['95007', 'me']);
+  assert.equal(run.stored().pets.me.left, 2325, 'the person\'s own pet is not taken either');
+});
+
+test('a drag in the first seconds after it starts is not taken: the app is still arranging the pets', async () => {
+  const run = load({ extra: { STARTUP_WAIT_MS: 400 }, prepare: withFriends({ 95007: [1239, 1181] }) });
+  await sleep(40);
+  await run.person.drag(-400, -300, '95007');
+  await sleep(250);
+  assert.deepEqual(Object.keys(run.stored().pets), ['me']);
+  await sleep(300);
+  await run.person.drag(-100, -100, '95007');
+  await sleep(250);
+  assert.ok(run.stored().pets['95007'], 'after that it is');
+});
+
+test('a drag that starts on a player\'s pet but is told by what is under the pointer, when the hook does not say whose it is', async () => {
+  const run = load({ prepare: withFriends({ 95007: [1239, 1181] }) });
+  await sleep(60);
+  const send = (event, payload) => { run.app.handle(event, payload); (run.handlers.get(event) ?? []).forEach(fn => fn({ event, id: 0, payload })); };
+  const c = run.app.friendRect(run.app.friends.get('95007'));
+  const start = { x: c.left + c.width / 2, y: c.top + c.height / 2 };
+  send('mouse-move', start);
+  send('mouse-button', { button: 'left', action: 'press' });                                        // no memberId
+  await sleep(run.app.armDelay + 5);
+  send('mouse-move', { x: start.x - 200, y: start.y - 100 });
+  await sleep(5);
+  send('mouse-button', { button: 'left', action: 'release' });
+  await sleep(250);
+  assert.deepEqual([run.stored().pets['95007'].left, run.stored().pets['95007'].top], [1039, 1081]);
 });
