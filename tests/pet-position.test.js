@@ -33,8 +33,8 @@ const NOW_KEY = 'modkit-pet-position-now';
 
 // The waits are seconds long; a test cannot wait that. Each constant is replaced, and each has to have been found.
 const FAST = {
-  CHECK_MS: 20, STARTUP_WAIT_MS: 0, QUIET_MS: 120, MOVE_QUIET_MS: 80, SENT_MS: 300, SETTLE_MS: 90, ACCEPT_MS: 150, SETTINGS_ACCEPT_MS: 300, EMULATION_ACCEPT_MS: 100,
-  GEOMETRY_MS: 10_000, NOTICE_MS: 250, GRAB_WAIT_MS: 4, PRESS_WAIT_MS: 25, STEP_MS: 3, STEPS: 5, RELEASE_WAIT_MS: 4, VERIFY_MS: 40, ECHO_MS: 30, TOLERANCE_PX: 2,
+  CHECK_MS: 20, STARTUP_WAIT_MS: 0, QUIET_MS: 120, MOVE_QUIET_MS: 80, SENT_MS: 300, SETTLE_MS: 90, ACCEPT_MS: 150, SETTINGS_ACCEPT_MS: 300,
+  GEOMETRY_MS: 10_000, NOTICE_MS: 400, GRAB_WAIT_MS: 4, PRESS_WAIT_MS: 25, STEP_MS: 3, STEPS: 5, RELEASE_WAIT_MS: 4, VERIFY_MS: 40, ECHO_MS: 30, TOLERANCE_PX: 2,
 };
 function fastSource(extra = {}) {
   let source = original;
@@ -261,7 +261,7 @@ test('pushed away by something, the pet is dragged back to where the person left
   assert.ok(run.app.dock.left < placed.left, 'it was pushed');
   run.app.bounds.maxLeft = 2325;                              // and the room is left: there is room again
   assert.ok(await until(() => run.live.state === '已拖回记住的位置'), 'it says it was brought back');
-  await sleep(90);                                            // a few looks later, still within the time it keeps saying so
+  await sleep(120);                                           // a few looks later, still within the time it keeps saying so
   assert.equal(run.live.state, '已拖回记住的位置', 'and it goes on saying so for a while');
   at(run, placed.left, placed.top);
   const events = run.emitted();
@@ -271,7 +271,7 @@ test('pushed away by something, the pet is dragged back to where the person left
   assert.ok(events.slice(2, -1).every(e => e === 'mouse-move') && events.length >= 6, 'moves in between');
   assert.equal(run.live.state, '已拖回记住的位置');
   assert.equal(run.storage.getItem(PLACEMENT_KEY), placementOf(placed), 'and the app\'s saving of the way back went through');
-  await sleep(400);
+  await sleep(550);
   assert.equal(run.live.state, '桌宠在记住的位置', 'and after a while it says the pet is in the place again');
   assert.deepEqual([run.stored().left, run.stored().top], [placed.left, placed.top], 'what is remembered is the same');
 });
@@ -544,4 +544,50 @@ test('what it sent itself, coming back, is not taken for the mouse moving', asyn
   assert.ok(await until(() => run.app.dock.left === 2325, 4000), 'it brought the pet back');
   const presses = run.emitted().filter(e => e === 'mouse-button:press').length;
   assert.equal(presses, 1, 'in one go: its own moves did not stop it');
+});
+
+test('the way back, part of the way or all of it, never leaves the app saving a place that is not the remembered one', async () => {
+  const storage = new FakeStorage();
+  storage.setItem(PLACEMENT_KEY, placementOf({ left: 2325, top: 1061 }));
+  const run = load({ storage });
+  await sleep(40);
+  const kept = run.storage.getItem(PLACEMENT_KEY);
+  run.app.bounds.maxLeft = 1900;
+  run.app.push(0, 0);
+  run.app.bounds.maxLeft = 2100;                              // part of the way
+  assert.ok(await until(() => run.app.dock.left === 2100, 3000));
+  await sleep(150);
+  assert.equal(run.storage.getItem(PLACEMENT_KEY), kept, 'the place it came to on the way is not what the app keeps');
+  run.app.bounds.maxLeft = 2325;                              // all of the way
+  assert.ok(await until(() => run.app.dock.left === 2325, 4000));
+  await sleep(150);
+  assert.equal(run.storage.getItem(PLACEMENT_KEY), kept, 'and at the end it is what it was');
+});
+
+test('a click on the pet, and the room pushing it a moment later, is not a place the person chose', async () => {
+  const run = load();
+  await sleep(40);
+  run.person.press();
+  run.person.release();                                       // a click: nothing moved while the button was down
+  run.app.bounds.maxLeft = 1900;
+  run.app.push(0, 0);                                         // and now the room pushes the pet
+  await sleep(260);                                           // past the time a drag would be settled
+  assert.equal(run.stored().left, 2325, 'what is remembered is not the pushed place');
+});
+
+test('the app saved a place on its own in the time the person had just touched the mouse: when the pet is back, what the app keeps is put right', async () => {
+  const storage = new FakeStorage();
+  storage.setItem(PLACEMENT_KEY, placementOf({ left: 2325, top: 1061 }));
+  const run = load({ storage });
+  await sleep(40);
+  const kept = run.storage.getItem(PLACEMENT_KEY);
+  run.person.press();
+  run.person.release();                                       // the mouse was touched: the app's saving is let through for a moment
+  run.app.bounds.maxLeft = 1900;
+  run.app.push(0, 0);                                         // and the app saves the pushed place in that moment
+  assert.equal(run.storage.getItem(PLACEMENT_KEY), placementOf({ left: 1900, top: 1061 }), 'it did get through');
+  run.app.bounds.maxLeft = 2325;
+  assert.ok(await until(() => run.app.dock.left === 2325, 4000), 'the pet comes back');
+  await sleep(150);
+  assert.equal(run.storage.getItem(PLACEMENT_KEY), kept, 'and what the app keeps is the remembered place again');
 });

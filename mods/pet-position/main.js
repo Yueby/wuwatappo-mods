@@ -38,7 +38,6 @@ const SENT_MS = 3000;             // how long what it sent is remembered, to tel
 const SETTLE_MS = 1200;           // after a drag ends: the app animates it into place and saves 380 ms after that
 const ACCEPT_MS = 2500;           // the app's own saving is let through for this long after the person touched the mouse
 const SETTINGS_ACCEPT_MS = 6000;  // and after the person changed where the pet goes in the app's settings
-const EMULATION_ACCEPT_MS = 1500; // and after it has dragged the pet back itself, on top of the time the drag takes
 const TOLERANCE_PX = 2;
 const RETRY_MS = [5000, 15000, 60000, 300000];     // waits after tries that did not bring it back
 const GEOMETRY_MS = 10_000;       // how long the window's position and scale are kept
@@ -49,7 +48,7 @@ const STEPS = 10;
 const RELEASE_WAIT_MS = 120;
 const VERIFY_MS = 1000;           // after letting go: the app animates the pet into place
 const ECHO_MS = 400;              // the events it sends itself come back to it this late
-const NOTICE_MS = 10_000;         // how long "dragged back" stays as the state, before it goes back to "in the place"
+const NOTICE_MS = 10_000;         // how long what a try came to stays as the state
 
 let alive = true;
 let remembered = null;            // { left, top, vw, vh, scale, placement }
@@ -64,7 +63,6 @@ let interrupted = false;          // the mouse moved while it was dragging
 const sentMoves = new Map();      // "x,y" -> when it sent a move there
 let attempts = 0;
 let nextTryAt = 0;
-let broughtBackAt = 0;
 let blockedOnce = false;
 let settingsSeen = null;
 let geometry = null;              // { x, y, scale, at }
@@ -179,23 +177,21 @@ function noteSettings(value) {
   if (!changed) return;
   acceptUntil = now() + SETTINGS_ACCEPT_MS;
   forget();
-  scheduleSettle(Math.max(0, SETTINGS_ACCEPT_MS - 500), true);
+  scheduleSettle(Math.max(0, SETTINGS_ACCEPT_MS - 500));
 }
 
 // --- what the person does -----------------------------------------------------------------------------------
 
-function scheduleSettle(ms, always = false) {
+// Takes the place the pet is at, after the app has had the time to put it down and save it.
+function scheduleSettle(ms) {
   clearTimeout(settleTimer);
   settleTimer = setTimeout(() => {
     settleTimer = null;
     if (!alive || emulating) return;
     const dock = readDock();
     if (!dock) return;
-    // Taken only if the pet really was moved by the drag (a click on it, or on something else, is not a place).
-    if (always || (pressDock && (Math.abs(dock.left - pressDock.left) > TOLERANCE_PX || Math.abs(dock.top - pressDock.top) > TOLERANCE_PX))) {
-      remember(dock);
-      report('位置已记住');
-    }
+    remember(dock);
+    report('位置已记住');
   }, ms);
 }
 
@@ -213,7 +209,10 @@ function onMouseButton(event) {
   } else if (action === 'release') {
     pressed = false;
     acceptUntil = now() + ACCEPT_MS;
-    scheduleSettle(SETTLE_MS);
+    // A drag moves the pet while the button is down, so it has moved by now; a click, or a pet that something else
+    // moves a moment later, has not. Only a drag is a place.
+    const dock = readDock();
+    if (pressDock && dock && (Math.abs(dock.left - pressDock.left) > TOLERANCE_PX || Math.abs(dock.top - pressDock.top) > TOLERANCE_PX)) scheduleSettle(SETTLE_MS);
   }
 }
 
@@ -231,7 +230,15 @@ mod.onEvent('mouse-move', onMouseMove);
 
 // --- bringing it back ---------------------------------------------------------------------------------------
 
+// The state line says what is going on now; what a try came to is said for a while, and not wiped by the next look.
+let noticeText = '';
+let noticeUntil = 0;
 function report(text) {
+  mod.live('state', now() < noticeUntil ? noticeText : text);
+}
+function notify(text) {
+  noticeText = text;
+  noticeUntil = now() + NOTICE_MS;
   mod.live('state', text);
 }
 
@@ -259,7 +266,6 @@ async function dragBy(dock, dx, dy) {
   };
   emulating = true;
   interrupted = false;
-  acceptUntil = now() + GRAB_WAIT_MS + PRESS_WAIT_MS + STEPS * STEP_MS + RELEASE_WAIT_MS + EMULATION_ACCEPT_MS;     // the app saves where it ends up: that is wanted
   try {
     await emit('mouse-move', toNative(dock.cx, dock.cy));
     await sleep(GRAB_WAIT_MS);
@@ -298,20 +304,22 @@ async function bringBack(dock) {
   await sleep(VERIFY_MS);
   if (!alive) return;
   if (interrupted) {
-    report('鼠标在动，稍后再把桌宠拖回去');
+    notify('鼠标在动，稍后再把桌宠拖回去');
     nextTryAt = now() + MOVE_QUIET_MS * 2;
     return;
   }
   const after = readDock();
   if (after && near(remembered.left - after.left, remembered.top - after.top)) {
     attempts = 0;
-    broughtBackAt = now();
-    report('已拖回记住的位置');
+    // The app saved where the pet ended up after the drag, and that was held back like any saving of its own. Now that
+    // it is where it should be, what the app keeps is what it kept when the place was remembered.
+    if (remembered.placement) originalSetItem.call(localStorage, PLACEMENT_KEY, remembered.placement);
+    notify('已拖回记住的位置');
     return;
   }
   attempts += 1;
   nextTryAt = now() + RETRY_MS[Math.min(attempts - 1, RETRY_MS.length - 1)];
-  report('桌宠没能回到记住的位置（那里可能被占着），稍后再试');
+  notify('桌宠没能回到记住的位置（那里可能被占着），稍后再试');
 }
 
 let checking = false;
@@ -331,7 +339,7 @@ async function check() {
     }
     if (near(remembered.left - dock.left, remembered.top - dock.top)) {
       attempts = 0;
-      report(now() - broughtBackAt < NOTICE_MS ? '已拖回记住的位置' : '桌宠在记住的位置');
+      report('桌宠在记住的位置');
       return;
     }
     if (!mod.config.get('restore')) {
