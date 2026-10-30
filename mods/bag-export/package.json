@@ -1,0 +1,12 @@
+{
+  "name": "bag-export",
+  "displayName": "背包导出",
+  "version": "0.1.0",
+  "description": "在背包和图鉴页加一个导出按钮：把拥有的东西、图鉴的完成情况和还缺的，复制成清单，或保存成文本、表格",
+  "author": "Yueby",
+  "modkit": {
+    "api": 5,
+    "permissions": ["clipboard", "page", "app-state"],
+    "windows": { "panel": "panel.js" }
+  }
+}
