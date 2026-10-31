@@ -68,11 +68,12 @@ function load({ config = {} } = {}) {
   return run;
 }
 
-test('what it declares: the main window, the patched pieces it needs, the api, one setting and no person words', () => {
+test('what it declares: the main window, the patched pieces it needs, the api, a switch for each motion and the strength, and no person words', () => {
   assert.deepEqual(manifest.modkit.windows, { main: 'main.js' });
   assert.deepEqual(manifest.modkit.permissions, ['app-internals']);
-  assert.equal(manifest.modkit.api, 7);
-  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['strength']);
+  assert.equal(manifest.modkit.api, 8);
+  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['press', 'drag', 'release', 'click', 'throw', 'gravity', 'others', 'strength']);
+  assert.ok(manifest.modkit.settings.filter(s => s.type === 'toggle').every(s => s.default === true), 'every motion is on to begin with');
   const code = source.split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
   assert.ok(!/fetch\(|XMLHttpRequest|new WebSocket|localStorage|invoke\(/.test(code), 'it only changes how the pet looks');
   const strings = [...code.matchAll(/'([^'\n]*)'|`([^`\n]*)`/g)].map(m => m[1] ?? m[2]).filter(text => /[一-鿿]/.test(text));
@@ -293,4 +294,46 @@ test('switched off while a pet flies, the flight is stopped', () => {
   run.dispose();
   assert.equal(run.glides[0].stopped, true);
   assert.equal(run.own.attributes.size, 0);
+});
+
+// --- the switches, and gravity -----------------------------------------------------------------------------------
+
+test('a thrown pet is pulled down: the gravity is given to the flight, and not when the switch for it is off', () => {
+  const on = load();
+  pull(on, on.me, 1800);
+  on.me({ type: 'release', moved: true, heldMs: 700 });
+  assert.ok(on.glides[0].options.gravity > 1000, `pulled down: ${on.glides[0].options.gravity}`);
+
+  const off = load({ config: { gravity: false } });
+  pull(off, off.me, 1800);
+  off.me({ type: 'release', moved: true, heldMs: 700 });
+  assert.equal(off.glides[0].options.gravity, 0, 'it glides on the way it was going');
+});
+
+test('each switch takes away its own motion and leaves the others', () => {
+  const none = (config, act) => {
+    const run = load({ config });
+    act(run);
+    return run;
+  };
+  const noPress = none({ press: false }, run => run.me({ type: 'press' }));
+  assert.equal(noPress.own.mode(), null);
+
+  const noDrag = none({ drag: false }, run => { run.me({ type: 'press' }); run.me({ type: 'dragstart' }); });
+  assert.equal(noDrag.own.mode(), null, 'neither lifted nor pressed');
+
+  const noRelease = none({ release: false }, run => { pull(run, run.me, 100); for (let i = 0; i < 12; i += 1) run.me({ type: 'drag', vx: 0, vy: 0 }); run.me({ type: 'release', moved: true, heldMs: 900 }); });
+  assert.equal(noRelease.own.mode(), null, 'put down without a bounce');
+
+  const noClick = none({ click: false }, run => { run.me({ type: 'press' }); run.me({ type: 'release', moved: false, heldMs: 60 }); });
+  assert.equal(noClick.own.mode(), null, 'a click without a jump, and not left pressed');
+
+  const noThrow = none({ throw: false }, run => { pull(run, run.me, 2500); run.me({ type: 'release', moved: true, heldMs: 700 }); });
+  assert.equal(noThrow.glides.length, 0, 'not thrown');
+  assert.equal(noThrow.own.mode(), 'bounce', 'put down with the bounce');
+
+  const noOthers = none({ others: false }, run => { run.friend(1); run.member(1, { type: 'press' }); });
+  assert.equal(noOthers.nodes['1'].mode(), null);
+  const mine = none({ others: false }, run => run.me({ type: 'press' }));
+  assert.equal(mine.own.mode(), 'down', 'but the own pet of the person is');
 });

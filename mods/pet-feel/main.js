@@ -1,8 +1,9 @@
 // Pet feel: springy motion for what the person does to a pet, the person's own and every other player's. Pressing it
 // squashes the body down, lifting it (a drag) picks it up by the head so that it dangles and swings the way it is
 // pulled, letting go drops it with a few bounces, and a quick press and release (a click) makes it jump and land.
-// Let go while it is being pulled fast, and it is thrown: it goes on with that speed, slows down, bounces off the edges
-// of the screen (squashing against them), and lands where it stops, which is its place from then on.
+// Let go while it is being pulled fast, and it is thrown: it goes on with that speed, is pulled down (gravity) and slows
+// down, bounces off the edges of the screen (squashing against them), and lands where it stops, on the floor, which is its
+// place from then on. Let go slowly, and it stays where it was put down.
 //
 // What the person does is told by the app (`mod.app.pet.onInteraction`, `mod.app.members.onInteraction`: whether the
 // pet is held and whether it has moved while held, looked at once a frame), not guessed from the mouse. The motion is
@@ -20,6 +21,7 @@ const DAMPING = 0.8;              // and how much of its speed it keeps each fra
 const THROW_MIN = 480;            // px a second: let go slower than this and it is only put down
 const THROW_MAX = 4200;           // and it is not thrown faster than this
 const BUMP_MS = 300;              // how long the squash against an edge is looked after
+const GRAVITY = 2600;             // px a second every second, down, for a thrown pet
 
 const BODY = ':is(.cat-mainbox, .room-cat-pet)';
 const EASE_SPRING = 'cubic-bezier(.3, 1.7, .5, 1)';
@@ -69,6 +71,7 @@ const CSS = `
 }
 `;
 
+const on = key => mod.config.get(key) !== false;
 const strength = () => {
   const value = Number(mod.config.get('strength'));
   return Number.isFinite(value) ? Math.min(2, Math.max(0.5, value)) : 1;
@@ -106,6 +109,7 @@ function throwIt(key, state, vx, vy) {
   const options = {
     vx,
     vy,
+    gravity: on('gravity') ? GRAVITY : 0,
     // while it flies it leans the way it goes, swinging on the same spring
     onFrame: ({ vx: now }) => {
       const target = Math.max(-TILT_MAX, Math.min(TILT_MAX, now * TILT_PER_PX)) * strength();
@@ -140,9 +144,9 @@ function handle(key, event) {
     state.speed = 0;
     state.vx = 0;
     state.vy = 0;
-    set(key, state, 'down');
+    set(key, state, on('press') ? 'down' : '');
   } else if (event.type === 'dragstart') {
-    set(key, state, 'drag');
+    set(key, state, on('drag') ? 'drag' : '');
   } else if (event.type === 'drag') {
     // The swing is a spring pulled towards the way the pet is being pulled, and it overshoots and comes back.
     const target = Math.max(-TILT_MAX, Math.min(TILT_MAX, event.vx * TILT_PER_PX)) * strength();
@@ -150,15 +154,15 @@ function handle(key, event) {
     state.tilt += state.speed;
     state.vx = state.vx * 0.5 + event.vx * 0.5;                      // and how fast it is going, over the last few frames
     state.vy = state.vy * 0.5 + event.vy * 0.5;
-    paint(key, state);
+    if (state.mode === 'drag') paint(key, state);
   } else if (event.type === 'release') {
     const click = !event.moved && event.heldMs <= CLICK_MS;
     const speed = Math.hypot(state.vx, state.vy);
-    if (!click && event.moved && speed >= THROW_MIN) {
+    if (!click && event.moved && speed >= THROW_MIN && on('throw')) {
       const scale = Math.min(1, THROW_MAX / speed);
       if (throwIt(key, state, state.vx * scale, state.vy * scale)) return;
     }
-    set(key, state, click ? 'pop' : 'bounce', BOUNCE_MS);
+    set(key, state, on(click ? 'click' : 'release') ? (click ? 'pop' : 'bounce') : '', BOUNCE_MS);
   }
 }
 
@@ -167,7 +171,9 @@ if (!mod.app?.pet?.onInteraction) {
 } else {
   mod.css(CSS);
   mod.app.pet.onInteraction(event => handle('me', event));
-  mod.app.members.onInteraction(event => handle(String(event.id), event));
+  mod.app.members.onInteraction(event => {
+    if (on('others')) handle(String(event.id), event);
+  });
 }
 
 mod.onDispose(() => {
