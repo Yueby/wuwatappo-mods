@@ -64,6 +64,7 @@ function makeApp(storage, options = {}) {
   const app = {
     available: options.available ?? true,
     status: null,
+    busy: false,                                            // another plugin is flying the pet
     pet: { left: 2325, top: 1061 },
     bounds: { maxLeft: 2325, maxTop: 1061 },                 // what is free: the person's own pet is kept inside
     members: new Map(),                                     // id -> { id, left, top, draggable, positioned }
@@ -111,6 +112,7 @@ function load({ storage = new FakeStorage(), config = {}, extra = {}, appOptions
     status: () => app.status,
     pet: {
       position: () => (app.available ? { ...app.pet } : null),
+      busy: () => app.busy,
       move(left, top) {
         if (!app.available) return false;
         app.moves.push({ id: 'me', left, top });
@@ -523,4 +525,20 @@ test('the panel half is one button that asks for the places now, and takes its r
   disposers.forEach(fn => fn());
   assert.equal(rows.length, 0);
   assert.equal(data.has(NOW_KEY), false);
+});
+
+test('while another plugin is throwing the pet, it is not put back; it is when the flight is over, and the place it lands in is the one that is kept', async () => {
+  const run = load();
+  await sleep(60);
+  run.app.dragPet(2025, 861);
+  await sleep(200);
+  run.app.busy = true;                                    // thrown: it flies somewhere else
+  run.app.pet = { left: 1200, top: 300 };
+  await sleep(200);
+  assert.deepEqual(run.app.moves, [], 'not while it flies');
+  run.app.busy = false;
+  run.app.dragPet(1200, 300);                             // it lands, and the app says so as after a drag
+  await sleep(250);
+  assert.deepEqual([run.stored().pets.me.left, run.stored().pets.me.top], [1200, 300], 'where it landed is its place now');
+  assert.deepEqual(run.app.moves, [], 'and it is not pulled back to the old one');
 });

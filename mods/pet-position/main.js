@@ -246,6 +246,7 @@ function check() {
       return;
     }
     noticeSettings();
+    if (mod.app.pet.busy?.()) return;                         // a pet is being thrown by another plugin: it is not in a place yet
     const pets = readPets();
     if (!pets.has(ME)) return;
     if (now() - startedAt < START_WAIT_MS) return;

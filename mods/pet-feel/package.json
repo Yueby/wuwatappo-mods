@@ -1,0 +1,15 @@
+{
+  "name": "pet-feel",
+  "displayName": "桌宠手感",
+  "version": "0.1.0",
+  "description": "给桌宠的按下、拖拽、松开和快速点击加上Q弹的动效，还能甩：拖动时松手，桌宠带着速度飞出去，撞到屏幕边缘会弹回来。自己的和房间里其他玩家的桌宠都有",
+  "author": "Yueby",
+  "modkit": {
+    "api": 7,
+    "permissions": ["app-internals"],
+    "windows": { "main": "main.js" },
+    "settings": [
+      { "key": "strength", "type": "number", "title": "动效强度", "description": "0.5 到 2，1 是默认；数值越大动作越夸张", "default": 1, "min": 0.5, "max": 2, "step": 0.1 }
+    ]
+  }
+}
