@@ -194,7 +194,7 @@ test('what it declares and shows: the permission it needs, the api it is written
   assert.deepEqual(manifest.modkit.permissions, ['app-internals']);
   assert.equal(manifest.modkit.api, 2);
   assert.equal(manifest.modkit.defaultEnabled, undefined, 'it is on: it only moves the pets');
-  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['restore', 'others', 'remembered', 'state']);
+  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['restore', 'remembered', 'state']);
   const code = (original + panelSource).split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
   const strings = [...code.matchAll(/'([^'\n]*)'|`([^`\n]*)`/g)].map(m => m[1] ?? m[2]).filter(text => /[一-鿿]/.test(text));
   for (const text of [manifest.description, manifest.displayName, ...manifest.modkit.settings.flatMap(s => [s.title, s.description, typeof s.default === 'string' ? s.default : null]), ...strings].filter(Boolean)) {
@@ -219,9 +219,9 @@ test('started with nothing remembered, it takes the place the pet is at, and say
   assert.deepEqual(stored.layout, { vw: 2560, vh: 1440, scale: 0.75 });
   assert.deepEqual(Object.keys(stored.pets), ['me'], 'the places of the others are not taken until the person drags them');
   assert.deepEqual([stored.pets.me.left, stored.pets.me.top], [2325, 1061]);
-  assert.equal(run.live.remembered, '左 2325，上 1061');
+  assert.equal(run.live.remembered, '自己 2325, 1061');
   await sleep(60);
-  assert.equal(run.live.state, '桌宠在记住的位置');
+  assert.equal(run.live.state, '位置正常');
   assert.deepEqual(run.app.moves, [], 'nothing is moved');
 });
 
@@ -232,7 +232,7 @@ test('a drag of the person\'s own pet is remembered, with the place the app save
   await sleep(200);
   assert.deepEqual([run.stored().pets.me.left, run.stored().pets.me.top], [2025, 861]);
   assert.equal(run.stored().placement, placementOf({ left: 2025, top: 861 }), 'and what the app keeps for its next start goes with it');
-  assert.equal(run.live.remembered, '左 2025，上 861');
+  assert.equal(run.live.remembered, '自己 2025, 861');
   assert.deepEqual(run.app.moves, [], 'the person\'s own drag is not "fixed"');
 });
 
@@ -244,7 +244,7 @@ test('a drag of another player\'s pet is remembered by the player, and nothing e
   assert.deepEqual(Object.keys(run.stored().pets).sort(), ['95007', 'me']);
   assert.deepEqual([run.stored().pets['95007'].left, run.stored().pets['95007'].top], [839, 881]);
   assert.equal(run.stored().pets.me.left, 2325, 'the person\'s own place is the same');
-  assert.equal(run.live.remembered, '左 2325，上 1061；1 位玩家的桌宠');
+  assert.equal(run.live.remembered, '自己 2325, 1061；玩家桌宠 1 个');
   assert.deepEqual(run.app.moves, []);
 });
 
@@ -270,10 +270,10 @@ test('pushed away by something, the pet is put back at once and directly, with n
   assert.ok(await until(() => run.app.pet.left === 2025), 'it is put back');
   at(run, 2025, 861);
   assert.deepEqual(run.app.moves, [{ id: 'me', left: 2025, top: 861 }], 'by one setting of the place');
-  assert.equal(run.live.state, '已把桌宠放回记住的位置');
+  assert.equal(run.live.state, '已还原位置');
   assert.equal(run.stored().pets.me.left, 2025, 'what is remembered is the same');
   await sleep(400);
-  assert.equal(run.live.state, '桌宠在记住的位置', 'and after a while it says the pet is in the place');
+  assert.equal(run.live.state, '位置正常', 'and after a while it says the pet is in the place');
 });
 
 test('the app saved a place of its own when it pushed the pet: the key it starts from is put back once the pet is, but the saving of a drag is not undone', async () => {
@@ -304,7 +304,7 @@ test('after entering a room, a player\'s pet put in a slot is set to the place t
   assert.ok(await until(() => run.app.members.get('95007').left === 839));
   memberAt(run, 95007, 839, 881);
   at(run, 2325, 1061);
-  assert.equal(run.live.state, '已把玩家的桌宠放回记住的位置');
+  assert.equal(run.live.state, '已还原玩家桌宠的位置');
   assert.deepEqual(run.app.moves, [{ id: '95007', left: 839, top: 881 }]);
 });
 
@@ -350,7 +350,7 @@ test('a place the app will not keep is tried again later and later, not in a loo
   await sleep(900);
   const tries = run.app.moves.length;
   assert.ok(tries >= 3 && tries <= 6, `a few tries, each after a longer wait: ${tries}`);
-  assert.equal(run.live.state, '桌宠没能留在记住的位置（那里可能被占着），稍后再试');
+  assert.equal(run.live.state, '位置未能保持（可能被应用占用），稍后重试');
   run.app.stubborn = false;                               // the room is left
   assert.ok(await until(() => run.app.pet.left === 2025, 3000), 'it holds once there is room');
 });
@@ -365,7 +365,7 @@ test('while the person holds a mouse button it does not move a pet, and goes on 
   run.app.push(0, 0);
   await sleep(150);
   assert.deepEqual(run.app.moves, [], 'not while a button is held');
-  assert.equal(run.live.state, '桌宠不在记住的位置，等鼠标松开再放回去');
+  assert.equal(run.live.state, '位置偏离记录，等待鼠标松开后还原');
   run.app.bounds.maxLeft = 2325;
   run.person.release();
   await sleep(20);
@@ -380,20 +380,8 @@ test('with the switch off it only keeps the saved place, and says the pet is els
   run.app.push(0, 0);
   await sleep(200);
   assert.deepEqual(run.app.moves, []);
-  assert.equal(run.live.state, '桌宠不在记住的位置（已设为不自动放回）');
+  assert.equal(run.live.state, '位置偏离记录（自动还原已关闭）');
   assert.equal(run.stored().pets.me.left, 2325, 'and what is remembered did not follow the push');
-});
-
-test('with the switch for the others off, only the person\'s own pet is remembered and set', async () => {
-  const storage = new FakeStorage();
-  storage.setItem(STORE, v2({ me: [2000, 900], 95007: [100, 100] }));
-  const run = load({ storage, config: { others: false }, prepare: withFriends({ 95007: [1239, 1181] }) });
-  assert.ok(await until(() => run.app.pet.left === 2000));
-  await sleep(150);
-  memberAt(run, 95007, 1239, 1181);
-  run.app.dragMember(95007, 500, 500);
-  await sleep(200);
-  assert.deepEqual([run.stored().pets['95007'].left, run.stored().pets['95007'].top], [100, 100], 'what was kept before is left alone, and the new place is not taken');
 });
 
 test('when the screen or the pet\'s size is not what it was, the old places are not used, for any pet', async () => {
@@ -402,7 +390,7 @@ test('when the screen or the pet\'s size is not what it was, the old places are 
   const run = load({ storage, prepare: withFriends({ 95007: [1239, 1181] }) });
   await sleep(200);
   assert.deepEqual(run.app.moves, []);
-  assert.equal(run.live.state, '屏幕或桌宠大小变了，之前记的位置不再用');
+  assert.equal(run.live.state, '屏幕或桌宠大小已变化，已记录的位置暂不使用');
 });
 
 test('where the pet goes, set in the app\'s settings, is the person\'s choice: the old place is let go and the new one taken', async () => {
@@ -416,7 +404,7 @@ test('where the pet goes, set in the app\'s settings, is the person\'s choice: t
   run.storage.setItem(SETTINGS_KEY, JSON.stringify({ position: 'topLeft', petScale: 75, windowOpacity: 60 }));          // the corner
   await sleep(60);
   assert.equal(run.stored(), null, 'the old place is let go');
-  assert.equal(run.live.remembered, '还没有');
+  assert.equal(run.live.remembered, '无');
   run.app.pet = { left: 12, top: 20 };                    // the app moves the pet to the corner and saves it
   run.app.saveKey();
   assert.ok(await until(() => run.stored()?.pets.me.left === 12, 2000), 'the corner is the place now');
@@ -431,8 +419,8 @@ test('"take the places the pets are at now", asked by the panel, takes every pet
   for (const fn of run.listeners.get('storage') ?? []) fn({ key: NOW_KEY, newValue: '123' });
   assert.deepEqual(Object.keys(run.stored().pets).sort(), ['110283', '95007', 'me']);
   assert.equal(run.stored().pets['95007'].left, 10);
-  assert.equal(run.live.remembered, '左 100，上 100；2 位玩家的桌宠');
-  assert.equal(run.live.state, '已把现在的位置记下来');
+  assert.equal(run.live.remembered, '自己 100, 100；玩家桌宠 2 个');
+  assert.equal(run.live.state, '已记录当前位置');
   for (const fn of run.listeners.get('storage') ?? []) fn({ key: NOW_KEY, newValue: null });          // the panel taking its request away
   assert.equal(run.stored().pets.me.left, 100);
 });
@@ -470,11 +458,11 @@ test('only the sixty most recently set places of the others are kept', async () 
 test('the app\'s state not being open: it says so, does nothing, and starts when it is', async () => {
   const run = load({ appOptions: { available: false } });
   await sleep(100);
-  assert.equal(run.live.state, '正在等应用开放桌宠的位置…');
+  assert.equal(run.live.state, '等待应用就绪…');
   assert.deepEqual(run.app.moves, []);
   run.app.status = { applied: [], missing: ['pet'] };
   await sleep(60);
-  assert.equal(run.live.state, '应用的这个版本没有开放桌宠的位置，无法使用');
+  assert.equal(run.live.state, '当前应用版本不受支持');
   run.app.status = null;
   run.app.available = true;
   assert.ok(await until(() => run.stored()), 'it takes the place once it is open');
@@ -484,7 +472,7 @@ test('the app\'s state not being open: it says so, does nothing, and starts when
 test('a loader that has no app state says so, and nothing is started', async () => {
   const run = load({ noApp: true });
   await sleep(60);
-  assert.equal(run.live.state, '加载器版本太旧，请先更新加载器');
+  assert.equal(run.live.state, '加载器版本过低，请先更新');
 });
 
 test('switched off, nothing is left running: no more checks, no more moves, no listening', async () => {

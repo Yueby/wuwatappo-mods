@@ -82,7 +82,6 @@ function petScale() {
 const layoutNow = () => ({ vw: window.innerWidth, vh: window.innerHeight, scale: petScale() });
 const sameLayout = (a, b) => !!a && !!b && a.vw === b.vw && a.vh === b.vh && a.scale === b.scale;
 const near = (dx, dy) => Math.abs(dx) <= TOLERANCE_PX && Math.abs(dy) <= TOLERANCE_PX;
-const wantsOthers = () => mod.config.get('others') !== false;
 
 // A player's pet that the app has put in the room (the slot it comes in at); before that its place is not one.
 const positioned = id => document.querySelector(`[data-room-cat-id="${id}"]`)?.dataset?.roomCatPositioned === 'true';
@@ -99,7 +98,7 @@ function readPets() {
   return pets;
 }
 
-const considered = pets => [...pets.values()].filter(pet => pet.id === ME || wantsOthers());
+const considered = pets => [...pets.values()];
 const isOut = pet => !!remembered?.pets[pet.id] && !near(remembered.pets[pet.id].left - pet.left, remembered.pets[pet.id].top - pet.top);
 
 // --- what is kept -------------------------------------------------------------------------------------------
@@ -133,9 +132,9 @@ function showRemembered() {
   const own = remembered?.pets[ME];
   const others = remembered ? Object.keys(remembered.pets).length - (own ? 1 : 0) : 0;
   const parts = [];
-  if (own) parts.push(`左 ${Math.round(own.left)}，上 ${Math.round(own.top)}`);
-  if (others) parts.push(`${others} 位玩家的桌宠`);
-  mod.live('remembered', parts.length ? parts.join('；') : '还没有');
+  if (own) parts.push(`自己 ${Math.round(own.left)}, ${Math.round(own.top)}`);
+  if (others) parts.push(`玩家桌宠 ${others} 个`);
+  mod.live('remembered', parts.length ? parts.join('；') : '无');
 }
 
 function remember(pet) {
@@ -187,9 +186,9 @@ function dragged(id) {
     timers.delete(timer);
     if (!alive || !mod.app.available()) return;
     const pet = readPets().get(id);
-    if (pet && (id === ME || wantsOthers())) {
+    if (pet) {
       remember(pet);
-      report('位置已记住');
+      report('位置已记录');
     }
   }, SETTLE_MS);
   timers.add(timer);
@@ -211,11 +210,11 @@ function putBack(pet) {
   const goal = remembered.pets[pet.id];
   trail(`放回 ${pet.id}：从 ${Math.round(pet.left)},${Math.round(pet.top)} 到 ${Math.round(goal.left)},${Math.round(goal.top)}（第 ${state.attempts} 次）`);
   if (!setPlace(pet)) {
-    notify('有桌宠现在放不回去（应用不让动它），稍后再试');
+    notify('暂时无法还原位置，稍后重试');
     return;
   }
-  if (state.attempts === 1) notify(pet.id === ME ? '已把桌宠放回记住的位置' : '已把玩家的桌宠放回记住的位置');
-  else notify(pet.id === ME ? '桌宠没能留在记住的位置（那里可能被占着），稍后再试' : '玩家的桌宠没能留在记住的位置（那里可能被占着），稍后再试');
+  if (state.attempts === 1) notify(pet.id === ME ? '已还原位置' : '已还原玩家桌宠的位置');
+  else notify(pet.id === ME ? '位置未能保持（可能被应用占用），稍后重试' : '玩家桌宠的位置未能保持（可能被应用占用），稍后重试');
 }
 
 function noticeSettings() {
@@ -242,7 +241,7 @@ function check() {
   checking = true;
   try {
     if (!mod.app.available()) {
-      report(mod.app.status() ? '应用的这个版本没有开放桌宠的位置，无法使用' : '正在等应用开放桌宠的位置…');
+      report(mod.app.status() ? '当前应用版本不受支持' : '等待应用就绪…');
       return;
     }
     noticeSettings();
@@ -252,15 +251,15 @@ function check() {
     if (now() - startedAt < START_WAIT_MS) return;
     if (!remembered || (!remembered.pets[ME] && sameLayout(remembered.layout, layoutNow()))) {
       if (now() < takeMeAt) {
-        report('桌宠的位置刚改过，稍后记下新的位置');
+        report('位置已变更，稍后记录新位置');
         return;
       }
       remember(pets.get(ME));                                // the first time: the place it is at
-      report('桌宠在记住的位置');
+      report('位置正常');
       return;
     }
     if (!sameLayout(remembered.layout, layoutNow())) {
-      report('屏幕或桌宠大小变了，之前记的位置不再用');
+      report('屏幕或桌宠大小已变化，已记录的位置暂不使用');
       return;
     }
     // The key the app starts from stays the person's: the app has saved another one when it pushed the pet itself.
@@ -273,15 +272,15 @@ function check() {
     const out = considered(pets).filter(isOut);
     for (const id of [...tries.keys()]) if (!out.some(pet => pet.id === id)) tries.delete(id);          // back in place by itself, or gone
     if (!out.length) {
-      report('桌宠在记住的位置');
+      report('位置正常');
       return;
     }
     if (!mod.config.get('restore')) {
-      report('桌宠不在记住的位置（已设为不自动放回）');
+      report('位置偏离记录（自动还原已关闭）');
       return;
     }
     if (pressed || now() - lastRelease < QUIET_MS || now() - lastUserDrag < QUIET_MS) {
-      report('桌宠不在记住的位置，等鼠标松开再放回去');
+      report('位置偏离记录，等待鼠标松开后还原');
       return;
     }
     for (const pet of out) putBack(pet);
@@ -298,7 +297,7 @@ const onStorage = event => {
     const pets = considered(readPets());
     if (!pets.length) return;
     for (const pet of pets) remember(pet);
-    report('已把现在的位置记下来');
+    report('已记录当前位置');
   }
 };
 window.addEventListener('storage', onStorage);
@@ -313,7 +312,7 @@ mod.onDispose(() => {
 });
 
 if (!mod.app) {
-  mod.live('state', '加载器版本太旧，请先更新加载器');
+  mod.live('state', '加载器版本过低，请先更新');
 } else {
   mod.onEvent('mouse-button', event => {
     const { button, action } = event?.payload ?? {};
@@ -335,7 +334,7 @@ if (!mod.app) {
   remembered = load();
   startedAt = now();
   showRemembered();
-  report('正在等应用开放桌宠的位置…');
+  report('等待应用就绪…');
   checkTimer = setInterval(check, CHECK_MS);
   check();
 }

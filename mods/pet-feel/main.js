@@ -171,9 +171,7 @@ if (!mod.app?.pet?.onInteraction) {
 } else {
   mod.css(CSS);
   mod.app.pet.onInteraction(event => handle('me', event));
-  mod.app.members.onInteraction(event => {
-    if (on('others')) handle(String(event.id), event);
-  });
+  mod.app.members.onInteraction(event => handle(String(event.id), event));
 }
 
 mod.onDispose(() => {

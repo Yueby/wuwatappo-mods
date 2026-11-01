@@ -72,7 +72,7 @@ test('what it declares: the main window, the patched pieces it needs, the api, a
   assert.deepEqual(manifest.modkit.windows, { main: 'main.js' });
   assert.deepEqual(manifest.modkit.permissions, ['app-internals']);
   assert.equal(manifest.modkit.api, 8);
-  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['press', 'drag', 'release', 'click', 'throw', 'gravity', 'others', 'strength']);
+  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['press', 'drag', 'release', 'click', 'throw', 'gravity', 'strength']);
   assert.ok(manifest.modkit.settings.filter(s => s.type === 'toggle').every(s => s.default === true), 'every motion is on to begin with');
   const code = source.split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
   assert.ok(!/fetch\(|XMLHttpRequest|new WebSocket|localStorage|invoke\(/.test(code), 'it only changes how the pet looks');
@@ -332,8 +332,4 @@ test('each switch takes away its own motion and leaves the others', () => {
   assert.equal(noThrow.glides.length, 0, 'not thrown');
   assert.equal(noThrow.own.mode(), 'bounce', 'put down with the bounce');
 
-  const noOthers = none({ others: false }, run => { run.friend(1); run.member(1, { type: 'press' }); });
-  assert.equal(noOthers.nodes['1'].mode(), null);
-  const mine = none({ others: false }, run => run.me({ type: 'press' }));
-  assert.equal(mine.own.mode(), 'down', 'but the own pet of the person is');
 });

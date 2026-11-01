@@ -5,10 +5,10 @@
 const NOW_KEY = 'modkit-pet-position-now';
 
 const remove = mod.entry({
-  title: '记下现在的位置',
-  description: '把桌宠现在所在的位置记作要保住的位置（平时拖一下桌宠就会自动记住）',
+  title: '记录当前位置',
+  description: '把当前所有桌宠的位置记为要保持的位置。拖动桌宠时会自动记录。',
   button: {
-    label: '记下',
+    label: '记录',
     onClick: () => {
       localStorage.setItem(NOW_KEY, String(Date.now()));
     },

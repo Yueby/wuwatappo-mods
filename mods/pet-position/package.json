@@ -1,30 +1,38 @@
 {
   "name": "pet-position",
   "displayName": "记住桌宠位置",
-  "version": "0.3.1",
-  "description": "记住自己和房间里其他玩家的桌宠最后一次亲手拖好的位置；重启软件或进房间后位置被挤动时，自动放回去",
+  "version": "0.3.2",
+  "description": "记录自己和房间内其他玩家桌宠的位置，在重启软件或进入房间后自动还原",
   "author": "Yueby",
   "modkit": {
     "api": 2,
-    "windows": { "main": "main.js", "panel": "panel.js" },
-    "permissions": ["app-internals"],
+    "windows": {
+      "main": "main.js",
+      "panel": "panel.js"
+    },
+    "permissions": [
+      "app-internals"
+    ],
     "settings": [
       {
         "key": "restore",
         "type": "toggle",
-        "title": "位置被挤动后放回去",
-        "description": "关掉以后只保住软件存下的位置（重启时有用），不会在软件运行中移动桌宠",
+        "title": "自动还原位置",
+        "description": "桌宠位置被应用改动后，自动还原到记录的位置。关闭后仅保存位置，运行中不移动桌宠。",
         "default": true
       },
       {
-        "key": "others",
-        "type": "toggle",
-        "title": "也记住其他玩家的桌宠",
-        "description": "房间里其他玩家的桌宠，拖到哪里就记住哪里，下次进房间时放回去（只在这台电脑上，不会发给房间）",
-        "default": true
+        "key": "remembered",
+        "type": "value",
+        "title": "已记录的位置",
+        "default": "无"
       },
-      { "key": "remembered", "type": "value", "title": "记住的位置", "default": "还没有" },
-      { "key": "state", "type": "value", "title": "状态", "default": "未运行" }
+      {
+        "key": "state",
+        "type": "value",
+        "title": "状态",
+        "default": "未运行"
+      }
     ]
   }
 }

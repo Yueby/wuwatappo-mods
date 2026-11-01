@@ -1,22 +1,70 @@
 {
   "name": "pet-feel",
   "displayName": "桌宠手感",
-  "version": "0.2.0",
-  "description": "给桌宠的按下、拖拽、松开和快速点击加上Q弹的动效，还能甩：拖动时快速松手，桌宠飞出去，会往下掉，撞到屏幕边缘会弹回来。自己的和房间里其他玩家的桌宠都有，每种效果都能单独开关",
+  "version": "0.3.0",
+  "description": "桌宠的按压、拖拽、松手、点击和抛掷动效，带弹性和重力，所有桌宠一致",
   "author": "Yueby",
   "modkit": {
     "api": 8,
-    "permissions": ["app-internals"],
-    "windows": { "main": "main.js" },
+    "permissions": [
+      "app-internals"
+    ],
+    "windows": {
+      "main": "main.js"
+    },
     "settings": [
-      { "key": "press", "type": "toggle", "title": "按下时压扁", "description": "按住桌宠时，身体向下压扁一点", "default": true },
-      { "key": "drag", "type": "toggle", "title": "拖动时拎起并摆动", "description": "拖动时桌宠像被拎着头顶提起来，脚下有影子，顺着拖动的方向来回晃", "default": true },
-      { "key": "release", "type": "toggle", "title": "松手时回弹", "description": "拖动后慢慢松手，桌宠落下并弹几下", "default": true },
-      { "key": "click", "type": "toggle", "title": "点一下时跳起", "description": "按下又很快松开（没有拖动），桌宠跳起来再落下", "default": true },
-      { "key": "throw", "type": "toggle", "title": "快速松手时甩出去", "description": "拖动时快速松手，桌宠带着速度飞出去，撞到屏幕边缘会被撞扁再弹回来；关掉后只是放下", "default": true },
-      { "key": "gravity", "type": "toggle", "title": "甩出去时有重力", "description": "甩出去的桌宠会往下掉，最后落在任务栏上；关掉后沿原方向滑行，停在哪里算哪里", "default": true },
-      { "key": "others", "type": "toggle", "title": "其他玩家的桌宠也一样", "description": "拖动房间里其他玩家的桌宠时，也有同样的动效（只在这台电脑上）", "default": true },
-      { "key": "strength", "type": "number", "title": "动效强度", "description": "0.5 到 2，1 是默认；数值越大动作越夸张", "default": 1, "min": 0.5, "max": 2, "step": 0.1 }
+      {
+        "key": "press",
+        "type": "toggle",
+        "title": "按压形变",
+        "description": "按住桌宠时，身体向下压扁。",
+        "default": true
+      },
+      {
+        "key": "drag",
+        "type": "toggle",
+        "title": "拖拽摆动",
+        "description": "拖动时桌宠被提起，并随拖动方向摆动。",
+        "default": true
+      },
+      {
+        "key": "release",
+        "type": "toggle",
+        "title": "松手回弹",
+        "description": "松手后桌宠落下并回弹。",
+        "default": true
+      },
+      {
+        "key": "click",
+        "type": "toggle",
+        "title": "点击弹跳",
+        "description": "快速点击时桌宠弹起。",
+        "default": true
+      },
+      {
+        "key": "throw",
+        "type": "toggle",
+        "title": "抛掷",
+        "description": "拖动中快速松手，桌宠按松手时的速度飞出，碰到屏幕边缘反弹。关闭后仅放下。",
+        "default": true
+      },
+      {
+        "key": "gravity",
+        "type": "toggle",
+        "title": "重力",
+        "description": "抛出的桌宠受重力下落，最后落在任务栏上。关闭后沿原方向滑行直至停下。",
+        "default": true
+      },
+      {
+        "key": "strength",
+        "type": "number",
+        "title": "动效强度",
+        "description": "范围 0.5 到 2，默认 1。",
+        "default": 1,
+        "min": 0.5,
+        "max": 2,
+        "step": 0.1
+      }
     ]
   }
 }
