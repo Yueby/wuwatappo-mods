@@ -1,11 +1,11 @@
 {
   "name": "pet-feel",
   "displayName": "桌宠手感",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "桌宠的按压、拖拽、松手、点击和抛掷动效，带弹性、重力和旋转滚动，所有桌宠一致",
   "author": "Yueby",
   "modkit": {
-    "api": 9,
+    "api": 10,
     "permissions": [
       "app-internals"
     ],

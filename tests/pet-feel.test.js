@@ -86,7 +86,7 @@ function load({ config = {} } = {}) {
 test('what it declares: the main window, the patched pieces it needs, the api, a switch for each motion and the strength, and no person words', () => {
   assert.deepEqual(manifest.modkit.windows, { main: 'main.js' });
   assert.deepEqual(manifest.modkit.permissions, ['app-internals']);
-  assert.equal(manifest.modkit.api, 9);
+  assert.equal(manifest.modkit.api, 10);
   assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['press', 'drag', 'release', 'click', 'throw', 'spin', 'gravity', 'strength']);
   assert.ok(manifest.modkit.settings.filter(s => s.type === 'toggle').every(s => s.default === true), 'every motion is on to begin with');
   const code = source.split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
@@ -232,7 +232,7 @@ test('let go while the hand is fast, the pet is thrown with the speed of the han
   assert.equal(run.own.mode(), 'fly');
   assert.ok(options.gravity > 1000 && options.friction < 1.5, 'it falls, and keeps its speed in the air');
   assert.ok(options.bounceY < options.bounce, 'it keeps less of its speed off the floor than off a side');
-  assert.ok(options.floorFriction < 3, 'and rolls on the floor for a while');
+  assert.ok(options.floorFriction < 1 && options.floorDecel > 100, 'and rolls on the floor for as far as its speed says: slowed by a push, not by a share of its speed');
 });
 
 test('every pet is thrown the same way for the same hand: the person\'s own and a player\'s', () => {

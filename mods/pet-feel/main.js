@@ -25,8 +25,10 @@ const THROW_MIN = 360;            // px a second: let go slower than this and it
 const THROW_MAX = 4600;           // and it is not thrown faster than this
 const BUMP_MS = 300;              // how long the squash against an edge is looked after
 const GRAVITY = 2600;             // px a second every second, down, for a thrown pet
-const AIR_FRICTION = 0.9;         // with gravity the speed it flies at is lost slowly (a share a second); without, the loader's own
-const FLOOR_FRICTION = 0.9;       // on the floor it slows down by rubbing (a share a second): it rolls on for a while
+const AIR_FRICTION = 0.3;         // with gravity the speed it flies at is hardly lost in the air (a share a second); without, the loader's own
+const FLOOR_FRICTION = 0.35;      // on the floor it slows down a little by the speed it has (a share a second)
+const FLOOR_DECEL = 220;          // and by a push that does not depend on it (px a second, each second, about a twelfth of the gravity): a rolling thing
+                                  // is slowed by about that whatever its speed is, so how far it rolls is what its speed says, the square of it
 const WALL_BOUNCE = 0.62;         // the share of its speed it keeps off a side or the top
 const FLOOR_BOUNCE = 0.46;        // and off the floor
 const SPIN_PER_PX = 0.12;         // degrees a second it is turned at, for each px a second it is thrown sideways
@@ -204,6 +206,7 @@ function throwIt(key, state, vx, vy) {
     gravity: gravity ? GRAVITY : 0,
     ...(gravity ? { friction: AIR_FRICTION } : {}),
     floorFriction: FLOOR_FRICTION,
+    floorDecel: FLOOR_DECEL,
     bounce: WALL_BOUNCE,
     bounceY: FLOOR_BOUNCE,
     onFrame: ({ vx: now, vy: down, floor }) => {
