@@ -1,11 +1,11 @@
 {
   "name": "pet-feel",
   "displayName": "桌宠手感",
-  "version": "0.3.0",
-  "description": "桌宠的按压、拖拽、松手、点击和抛掷动效，带弹性和重力，所有桌宠一致",
+  "version": "0.4.0",
+  "description": "桌宠的按压、拖拽、松手、点击和抛掷动效，带弹性、重力和旋转滚动，所有桌宠一致",
   "author": "Yueby",
   "modkit": {
-    "api": 8,
+    "api": 9,
     "permissions": [
       "app-internals"
     ],
@@ -45,7 +45,14 @@
         "key": "throw",
         "type": "toggle",
         "title": "抛掷",
-        "description": "拖动中快速松手，桌宠按松手时的速度飞出，碰到屏幕边缘反弹。关闭后仅放下。",
+        "description": "拖动中快速松手，桌宠按手的速度飞出，碰到屏幕边缘反弹。关闭后仅放下。",
+        "default": true
+      },
+      {
+        "key": "spin",
+        "type": "toggle",
+        "title": "旋转滚动",
+        "description": "抛出的桌宠会旋转，落地后滚动，停下后自己摆正。关闭后只按飞行方向倾斜。",
         "default": true
       },
       {

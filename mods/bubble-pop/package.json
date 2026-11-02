@@ -1,0 +1,28 @@
+{
+  "name": "bubble-pop",
+  "displayName": "气泡弹跳",
+  "version": "0.1.0",
+  "description": "桌宠发出的表情气泡带弹性：弹出时先胀大再回弹，边飘边轻轻摇摆，自己的和房间里其他玩家的一致",
+  "author": "Yueby",
+  "modkit": {
+    "api": 4,
+    "permissions": [
+      "page"
+    ],
+    "windows": {
+      "main": "main.js"
+    },
+    "settings": [
+      {
+        "key": "strength",
+        "type": "number",
+        "title": "动效强度",
+        "description": "范围 0.5 到 2，默认 1。",
+        "default": 1,
+        "min": 0.5,
+        "max": 2,
+        "step": 0.1
+      }
+    ]
+  }
+}

@@ -17,6 +17,20 @@ const running = [];
 after(() => running.forEach(run => run.dispose()));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+// The page's frames, for the turning: a queue that a test moves along, `ms` at a time.
+let clock = performance.now();
+let queue = [];
+globalThis.requestAnimationFrame = fn => { queue.push(fn); return queue.length; };
+globalThis.cancelAnimationFrame = () => { queue = []; };
+function frames(count, ms = 16) {
+  for (let i = 0; i < count; i += 1) {
+    clock += ms;
+    const now = queue;
+    queue = [];
+    for (const fn of now) fn(clock);
+  }
+}
+
 // The waits are about half a second; a test cannot wait that.
 let fast = source;
 for (const [name, value] of Object.entries({ CLICK_MS: 250, BOUNCE_MS: 60, BUMP_MS: 40 })) {
@@ -40,6 +54,7 @@ function element() {
 
 function load({ config = {} } = {}) {
   const settings = { strength: 1, ...config };
+  queue = [];
   const nodes = { me: element() };
   const sheets = [];
   const handlers = { me: null, members: null };
@@ -71,8 +86,8 @@ function load({ config = {} } = {}) {
 test('what it declares: the main window, the patched pieces it needs, the api, a switch for each motion and the strength, and no person words', () => {
   assert.deepEqual(manifest.modkit.windows, { main: 'main.js' });
   assert.deepEqual(manifest.modkit.permissions, ['app-internals']);
-  assert.equal(manifest.modkit.api, 8);
-  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['press', 'drag', 'release', 'click', 'throw', 'gravity', 'strength']);
+  assert.equal(manifest.modkit.api, 9);
+  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['press', 'drag', 'release', 'click', 'throw', 'spin', 'gravity', 'strength']);
   assert.ok(manifest.modkit.settings.filter(s => s.type === 'toggle').every(s => s.default === true), 'every motion is on to begin with');
   const code = source.split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
   assert.ok(!/fetch\(|XMLHttpRequest|new WebSocket|localStorage|invoke\(/.test(code), 'it only changes how the pet looks');
@@ -196,30 +211,205 @@ test('a loader without the events of a pet says so and does nothing', () => {
 
 // --- throwing ---------------------------------------------------------------------------------------------------
 
-// The person drags at a speed and lets go: the pet is thrown with it.
+// The person drags: the loader tells each frame how the hand moves, and, at the release, how fast it was going.
 function pull(run, send, vx, vy = 0, frames = 8) {
   send({ type: 'press' });
   send({ type: 'dragstart' });
   for (let i = 0; i < frames; i += 1) send({ type: 'drag', vx, vy });
 }
 
-test('let go while being pulled fast, the pet is thrown with that speed, and flies leaning the way it goes', () => {
+const letGo = (send, vx = 0, vy = 0, extra = {}) => send({ type: 'release', moved: true, heldMs: 700, vx, vy, ...extra });
+
+test('let go while the hand is fast, the pet is thrown with the speed of the hand, and with what makes it fall, bounce and roll', () => {
   const run = load();
   pull(run, run.me, 1800, -600);
-  run.me({ type: 'release', moved: true, heldMs: 700 });
+  letGo(run.me, 1800, -600);
   assert.equal(run.glides.length, 1);
   const { key, options } = run.glides[0];
   assert.equal(key, 'me');
-  assert.ok(Math.abs(options.vx - 1800) < 40 && Math.abs(options.vy + 600) < 20, `the speed it was pulled at: ${options.vx}, ${options.vy}`);
+  assert.equal(options.vx, 1800);
+  assert.equal(options.vy, -600);
   assert.equal(run.own.mode(), 'fly');
-  for (let i = 0; i < 40; i += 1) options.onFrame({ vx: 1500, vy: 0, left: 0, top: 0 });
-  assert.ok(Number(run.own.props.get('--wf-tilt')) > 8, 'leaning forward');
+  assert.ok(options.gravity > 1000 && options.friction < 1.5, 'it falls, and keeps its speed in the air');
+  assert.ok(options.bounceY < options.bounce, 'it keeps less of its speed off the floor than off a side');
+  assert.ok(options.floorFriction < 3, 'and rolls on the floor for a while');
 });
 
-test('it squashes against an edge it hits, along the way it hit it, and goes on flying; where it stops, it lands with a bounce', async () => {
+test('every pet is thrown the same way for the same hand: the person\'s own and a player\'s', () => {
   const run = load();
-  pull(run, run.me, 2000);
-  run.me({ type: 'release', moved: true, heldMs: 700 });
+  run.friend(95007);
+  letGo(run.me, 1500, -900);
+  letGo(event => run.member(95007, event), 1500, -900);
+  const [mine, theirs] = run.glides;
+  assert.equal(mine.key, 'me');
+  assert.equal(theirs.key, '95007');
+  assert.deepEqual({ ...theirs.options, onFrame: 0, onBump: 0, onEnd: 0 }, { ...mine.options, onFrame: 0, onBump: 0, onEnd: 0 });
+});
+
+test('the speed is the one the loader says at the release, and nothing that came before it', () => {
+  const run = load();
+  pull(run, run.me, 2500);
+  letGo(run.me, 40, 0);                                                    // the hand had stopped
+  assert.equal(run.glides.length, 0, 'not thrown');
+  assert.equal(run.own.mode(), 'bounce');
+
+  const old = load();                                                      // a release that does not say a speed
+  pull(old, old.me, 2500);
+  old.me({ type: 'release', moved: true, heldMs: 700 });
+  assert.equal(old.glides.length, 0);
+
+  const slow = load();
+  pull(slow, slow.me, 200);
+  letGo(slow.me, 200, 0);
+  assert.equal(slow.glides.length, 0, 'let go slowly, it is only put down');
+  assert.equal(slow.own.mode(), 'bounce');
+
+  const click = load();
+  click.me({ type: 'press' });
+  click.me({ type: 'release', moved: false, heldMs: 60, vx: 3000, vy: 0 });
+  assert.equal(click.glides.length, 0, 'a click is not a throw, whatever the pointer did');
+});
+
+test('it is not thrown faster than the most it can be, and keeps the way it was going', () => {
+  const run = load();
+  letGo(run.me, 9000, 9000);
+  const { options } = run.glides[0];
+  assert.ok(Math.hypot(options.vx, options.vy) <= 4601, `${Math.hypot(options.vx, options.vy)}`);
+  assert.ok(Math.abs(options.vx - options.vy) < 1);
+});
+
+// --- turning ----------------------------------------------------------------------------------------------------
+
+const rotOf = node => Number(node.props.get('--wf-rot') ?? 0);
+
+test('it turns as it flies, the way it was thrown, and a thrown pet turns the same whoever it is', () => {
+  const right = load();
+  letGo(right.me, 2400, -500);
+  frames(10);
+  assert.ok(rotOf(right.own) > 25, `turned forward: ${rotOf(right.own)}`);
+
+  const left = load();
+  letGo(left.me, -2400, -500);
+  frames(10);
+  assert.ok(rotOf(left.own) < -25, `and the other way: ${rotOf(left.own)}`);
+
+  const friend = load();
+  const node = friend.friend(95007);
+  letGo(event => friend.member(95007, event), 2400, -500);
+  frames(10);
+  assert.ok(Math.abs(rotOf(node) - rotOf(right.own)) < 0.5, 'a player\'s pet turns exactly as the person\'s own does');
+});
+
+test('on the floor it turns as a wheel would for the way it goes: it rolls', () => {
+  const run = load();
+  letGo(run.me, 1200, 0);
+  const { options } = run.glides[0];
+  const angles = [];
+  for (let i = 0; i < 120; i += 1) {
+    options.onFrame({ vx: 900, vy: 0, left: 0, top: 0, floor: true });
+    frames(1);
+    angles.push(rotOf(run.own));
+  }
+  const rate = ((angles[119] - angles[99]) / (20 * 0.016));                // degrees a second near the end
+  const wheel = (900 / 40) * (180 / Math.PI);
+  assert.ok(Math.abs(rate - wheel) < wheel * 0.12, `turning at ${rate.toFixed(0)} degrees a second, a wheel does ${wheel.toFixed(0)}`);
+});
+
+test('it hops a little on the floor, and between the hops it still rolls', () => {
+  const run = load();
+  letGo(run.me, 1200, 0);
+  const { options } = run.glides[0];
+  const angles = [];
+  for (let i = 0; i < 160; i += 1) {
+    options.onFrame({ vx: 900, vy: 0, left: 0, top: 0, floor: i % 6 === 0 });     // in contact one frame in six
+    frames(1);
+    angles.push(rotOf(run.own));
+  }
+  const rate = (angles[159] - angles[119]) / (40 * 0.016);
+  assert.ok(rate > 900, `still turning at ${rate.toFixed(0)} degrees a second`);
+});
+
+test('what it hits turns it: the floor rubs it the way it was going', () => {
+  const rub = angle => {
+    const run = load();
+    letGo(run.me, 100, -500);                                                // hardly turning to begin with
+    const { options } = run.glides[0];
+    options.onFrame({ vx: 1200, vy: 800, left: 0, top: 0, floor: false });
+    if (angle) options.onBump({ axis: 'y', speed: 800, side: 'max' });
+    frames(8);
+    return rotOf(run.own);
+  };
+  assert.ok(rub(true) > rub(false) + 5, `${rub(true)} against ${rub(false)}`);
+});
+
+test('when it has stopped it rights itself with a wobble, and ends upright with a last squash', async () => {
+  const run = load();
+  letGo(run.me, 2000, -300);
+  const { options } = run.glides[0];
+  frames(8);
+  const tipped = rotOf(run.own);
+  assert.ok(tipped > 15 && tipped < 180, `it was turned part of the way: ${tipped}`);
+  options.onFrame({ vx: 0, vy: 0, left: 0, top: 0, floor: true });
+  options.onEnd({ why: 'rest' });
+  assert.equal(run.own.mode(), 'roll', 'it is righting itself');
+  const seen = [];
+  for (let i = 0; i < 400 && run.own.mode() === 'roll'; i += 1) {
+    frames(1);
+    seen.push(rotOf(run.own));
+  }
+  assert.ok(Math.min(...seen) < -1, `it goes past upright and comes back (lowest ${Math.min(...seen).toFixed(1)})`);
+  assert.equal(run.own.mode(), 'bounce', 'upright and still: the last squash');
+  assert.equal(rotOf(run.own), 0);
+  await sleep(120);
+  assert.equal(run.own.mode(), null);
+});
+
+test('a pet that is rolling fast is not pulled upright until it has slowed', () => {
+  const run = load();
+  letGo(run.me, 2000, 0);
+  const { options } = run.glides[0];
+  for (let i = 0; i < 90; i += 1) {
+    options.onFrame({ vx: 1500, vy: 0, left: 0, top: 0, floor: true });
+    frames(1);
+  }
+  assert.ok(Math.abs(rotOf(run.own)) > 300, `still turning over: ${rotOf(run.own)}`);
+  for (let i = 0; i < 400; i += 1) {
+    options.onFrame({ vx: 80, vy: 0, left: 0, top: 0, floor: true });
+    frames(1);
+  }
+  assert.ok(Math.abs(rotOf(run.own) % 360) < 3 || Math.abs(rotOf(run.own) % 360) > 357, `and upright once it is slow: ${rotOf(run.own)}`);
+});
+
+test('taking the pet while it turns turns it upright in the hand', () => {
+  const run = load();
+  letGo(run.me, 2400, -500);
+  frames(10);
+  assert.ok(Math.abs(rotOf(run.own)) > 20);
+  run.me({ type: 'press' });
+  assert.equal(run.own.mode(), 'down');
+  frames(150);
+  assert.equal(rotOf(run.own), 0);
+  assert.equal(run.own.mode(), 'down', 'and it is still pressed: the end of the turning does not bounce it');
+});
+
+test('the switch for turning off: it leans the way it goes, as before, and does not turn', () => {
+  const run = load({ config: { spin: false } });
+  letGo(run.me, 1500, 0);
+  const { options } = run.glides[0];
+  for (let i = 0; i < 40; i += 1) options.onFrame({ vx: 1500, vy: 0, left: 0, top: 0 });
+  assert.ok(rotOf(run.own) > 8 && rotOf(run.own) <= 16.5, `leaning: ${rotOf(run.own)}`);
+  frames(30);
+  assert.ok(rotOf(run.own) <= 16.5, 'and nothing else turns it');
+  options.onEnd({ why: 'rest' });
+  assert.equal(run.own.mode(), 'bounce');
+  assert.equal(rotOf(run.own), 0);
+});
+
+// --- the rest of the flight ---------------------------------------------------------------------------------------
+
+test('it squashes against an edge it hits, along the way it hit it, and goes on flying', async () => {
+  const run = load({ config: { spin: false } });
+  letGo(run.me, 2000, 0);
   const { options } = run.glides[0];
   options.onBump({ axis: 'x', speed: 900, side: 'max' });
   assert.equal(run.own.mode(), 'bump-x');
@@ -233,38 +423,9 @@ test('it squashes against an edge it hits, along the way it hit it, and goes on 
   assert.equal(run.own.mode(), null);
 });
 
-test('let go slowly, or after holding still, or at more than a click that did not move, it is only put down', () => {
-  const slow = load();
-  pull(slow, slow.me, 200);
-  slow.me({ type: 'release', moved: true, heldMs: 900 });
-  assert.equal(slow.glides.length, 0);
-  assert.equal(slow.own.mode(), 'bounce');
-
-  const still = load();
-  pull(still, still.me, 2500);
-  for (let i = 0; i < 12; i += 1) still.me({ type: 'drag', vx: 0, vy: 0 });                    // held still for a moment before letting go
-  still.me({ type: 'release', moved: true, heldMs: 2000 });
-  assert.equal(still.glides.length, 0, 'the speed is the one at the moment of letting go');
-
-  const click = load();
-  click.me({ type: 'press' });
-  click.me({ type: 'release', moved: false, heldMs: 60 });
-  assert.equal(click.glides.length, 0);
-});
-
-test('it is not thrown faster than the most it can be', () => {
-  const run = load();
-  pull(run, run.me, 9000, 9000, 12);
-  run.me({ type: 'release', moved: true, heldMs: 700 });
-  const { options } = run.glides[0];
-  assert.ok(Math.hypot(options.vx, options.vy) <= 4201, `${Math.hypot(options.vx, options.vy)}`);
-  assert.ok(Math.abs(options.vx - options.vy) < 1, 'the way it was going is kept');
-});
-
 test('taking the pet again while it flies stops it, and is a press', () => {
   const run = load();
-  pull(run, run.me, 1800);
-  run.me({ type: 'release', moved: true, heldMs: 700 });
+  letGo(run.me, 1800, 0);
   const thrown = run.glides[0];
   run.me({ type: 'press' });
   assert.equal(thrown.stopped, true);
@@ -277,8 +438,7 @@ test('a player\'s pet is thrown too, with its own flight', () => {
   const run = load();
   const friend = run.friend(95007);
   const other = run.friend(110283);
-  pull(run, (event) => run.member(95007, event), -1500, 300);
-  run.member(95007, { type: 'release', moved: true, heldMs: 500 });
+  letGo(event => run.member(95007, event), -1500, 300);
   assert.equal(run.glides.length, 1);
   assert.equal(run.glides[0].key, '95007');
   assert.ok(run.glides[0].options.vx < -1400);
@@ -287,27 +447,29 @@ test('a player\'s pet is thrown too, with its own flight', () => {
   assert.equal(run.own.mode(), null);
 });
 
-test('switched off while a pet flies, the flight is stopped', () => {
+test('switched off while a pet flies, the flight is stopped and nothing is left on the pet', () => {
   const run = load();
-  pull(run, run.me, 1800);
-  run.me({ type: 'release', moved: true, heldMs: 700 });
+  letGo(run.me, 1800, 0);
+  frames(4);
   run.dispose();
   assert.equal(run.glides[0].stopped, true);
   assert.equal(run.own.attributes.size, 0);
+  assert.equal(run.own.props.size, 0);
+  frames(4);
+  assert.equal(run.own.props.size, 0, 'and the turning does not bring anything back');
 });
 
 // --- the switches, and gravity -----------------------------------------------------------------------------------
 
 test('a thrown pet is pulled down: the gravity is given to the flight, and not when the switch for it is off', () => {
   const on = load();
-  pull(on, on.me, 1800);
-  on.me({ type: 'release', moved: true, heldMs: 700 });
+  letGo(on.me, 1800, 0);
   assert.ok(on.glides[0].options.gravity > 1000, `pulled down: ${on.glides[0].options.gravity}`);
 
   const off = load({ config: { gravity: false } });
-  pull(off, off.me, 1800);
-  off.me({ type: 'release', moved: true, heldMs: 700 });
+  letGo(off.me, 1800, 0);
   assert.equal(off.glides[0].options.gravity, 0, 'it glides on the way it was going');
+  assert.equal(off.glides[0].options.friction, undefined, 'with the loader\'s own friction');
 });
 
 test('each switch takes away its own motion and leaves the others', () => {
@@ -322,14 +484,13 @@ test('each switch takes away its own motion and leaves the others', () => {
   const noDrag = none({ drag: false }, run => { run.me({ type: 'press' }); run.me({ type: 'dragstart' }); });
   assert.equal(noDrag.own.mode(), null, 'neither lifted nor pressed');
 
-  const noRelease = none({ release: false }, run => { pull(run, run.me, 100); for (let i = 0; i < 12; i += 1) run.me({ type: 'drag', vx: 0, vy: 0 }); run.me({ type: 'release', moved: true, heldMs: 900 }); });
+  const noRelease = none({ release: false }, run => { pull(run, run.me, 100); letGo(run.me, 0, 0, { heldMs: 900 }); });
   assert.equal(noRelease.own.mode(), null, 'put down without a bounce');
 
   const noClick = none({ click: false }, run => { run.me({ type: 'press' }); run.me({ type: 'release', moved: false, heldMs: 60 }); });
   assert.equal(noClick.own.mode(), null, 'a click without a jump, and not left pressed');
 
-  const noThrow = none({ throw: false }, run => { pull(run, run.me, 2500); run.me({ type: 'release', moved: true, heldMs: 700 }); });
+  const noThrow = none({ throw: false }, run => { pull(run, run.me, 2500); letGo(run.me, 2500, 0); });
   assert.equal(noThrow.glides.length, 0, 'not thrown');
   assert.equal(noThrow.own.mode(), 'bounce', 'put down with the bounce');
-
 });
