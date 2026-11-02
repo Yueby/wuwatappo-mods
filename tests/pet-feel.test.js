@@ -364,6 +364,25 @@ test('when it has stopped it rights itself with a wobble, and ends upright with 
   assert.equal(run.own.mode(), null);
 });
 
+test('the turning follows the speed on the floor all the way down: as it slows it turns slower, and the other way when it goes back', () => {
+  const run = load();
+  letGo(run.me, 1500, 0);
+  const { options } = run.glides[0];
+  const wheel = vx => (vx / 40) * (180 / Math.PI);
+  const rateAt = vx => {
+    for (let i = 0; i < 20; i += 1) { options.onFrame({ vx, vy: 0, left: 0, top: 0, floor: true }); frames(1); }
+    const from = rotOf(run.own);
+    for (let i = 0; i < 20; i += 1) { options.onFrame({ vx, vy: 0, left: 0, top: 0, floor: true }); frames(1); }
+    return (rotOf(run.own) - from) / (20 * 0.016);
+  };
+  for (const vx of [1200, 700, 300, 150]) {
+    const rate = rateAt(vx);
+    assert.ok(Math.abs(rate - wheel(vx)) < wheel(vx) * 0.06, `at ${vx} px a second it turns ${rate.toFixed(0)} degrees a second, a wheel ${wheel(vx).toFixed(0)}`);
+  }
+  const back = rateAt(-500);
+  assert.ok(Math.abs(back - wheel(-500)) < Math.abs(wheel(-500)) * 0.06, `and turns back at ${back.toFixed(0)}`);
+});
+
 test('a pet that is rolling fast is not pulled upright until it has slowed', () => {
   const run = load();
   letGo(run.me, 2000, 0);
@@ -374,7 +393,7 @@ test('a pet that is rolling fast is not pulled upright until it has slowed', () 
   }
   assert.ok(Math.abs(rotOf(run.own)) > 300, `still turning over: ${rotOf(run.own)}`);
   for (let i = 0; i < 400; i += 1) {
-    options.onFrame({ vx: 80, vy: 0, left: 0, top: 0, floor: true });
+    options.onFrame({ vx: 10, vy: 0, left: 0, top: 0, floor: true });
     frames(1);
   }
   assert.ok(Math.abs(rotOf(run.own) % 360) < 3 || Math.abs(rotOf(run.own) % 360) > 357, `and upright once it is slow: ${rotOf(run.own)}`);

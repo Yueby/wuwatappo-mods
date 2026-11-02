@@ -33,8 +33,8 @@ const SPIN_PER_PX = 0.12;         // degrees a second it is turned at, for each 
 const SPIN_MAX = 1000;            // degrees a second at most
 const SPIN_AIR = 0.35;            // the share of its turning it loses each second in the air
 const ROLL_RADIUS = 40;           // px: on the floor it turns as a wheel this big would, along with the way it goes
-const ROLL_GRIP = 9;              // how fast, a share a second, its turning is made the rolling one
-const RIGHT_SPEED = 260;          // px a second: slower than this on the floor and it starts to right itself
+const ROLL_GRIP = 30;             // how fast, a share a second, its turning is made the rolling one when it lands (then it is exactly that)
+const RIGHT_SPEED = 90;           // px a second: slower than this on the floor and it starts to right itself (faster, it only rolls)
 const RIGHT_STIFFNESS = 170;      // how hard it is pulled upright
 const RIGHT_DAMPING = 11;         // and how much it is held back: less than critical, so it wobbles before it stands still
 const FLOOR_MS = 120;              // it is on the floor if it touched it this recently: it hops a little, and between hops it still rolls
@@ -150,8 +150,11 @@ function turn(now) {
       spin.omega *= Math.exp(-SPIN_AIR * dt);
       authority = onFloor ? Math.max(0, Math.min(1, 1 - Math.abs(motion.vx) / RIGHT_SPEED)) : 0;
       if (onFloor) {
+        // rolling without slipping: the turning is the speed over the radius, whatever the speed is, as it slows and as it turns back
         const rolling = (motion.vx / ROLL_RADIUS) * DEGREES;
-        spin.omega += (rolling - spin.omega) * (1 - Math.exp(-ROLL_GRIP * (1 - authority) * dt));
+        const grip = 1 - Math.exp(-ROLL_GRIP * (1 - authority) * dt);
+        spin.omega += (rolling - spin.omega) * grip;
+        if (authority === 0 && Math.abs(rolling - spin.omega) < 25) spin.omega = rolling;
       }
     }
     if (authority > 0) {
