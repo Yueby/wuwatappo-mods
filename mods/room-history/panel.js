@@ -122,7 +122,7 @@ function currentRoom() {
 
 const button = (label, onClick) => {
   const node = document.createElement('button');
-  node.className = 'setting-btn';
+  node.className = 'wrh-btn';
   node.type = 'button';
   node.textContent = label;
   node.addEventListener('click', onClick);
@@ -223,6 +223,18 @@ let sectionNode = null;
 let sectionStop = null;
 let sectionStyle = null;
 
+// The buttons are the MOD page's own (a pill in the app's yellow that sinks when it is pressed), written out here because the plugin
+// has to look right under any loader: they are in the page that this plugin puts on the room page, and in its own settings.
+const BUTTON_CSS = `
+.wrh-btn {
+  display: inline-block; box-sizing: border-box; min-width: 64px; height: 28px; margin: 0; padding: 0 16px; border: 1px solid rgb(231, 183, 124); border-radius: 20px;
+  font: inherit; font-size: 16px; line-height: 26px; text-align: center; color: rgb(142, 94, 67); background: rgb(254, 210, 145); cursor: pointer;
+  filter: drop-shadow(0 2px 0 rgb(231, 183, 124)); transition: transform .09s ease-out, filter .09s ease-out;
+}
+.wrh-btn:not(:disabled):active { transform: translateY(1px); filter: none; }
+.wrh-btn:disabled { opacity: .5; cursor: default; filter: none; }
+`;
+
 const SECTION_CSS = `
 /* The page is a column, and the list takes what is left of its height, so that it is the list that scrolls and not the page. */
 .room-module .panel-content { display: flex; flex-direction: column; }
@@ -237,8 +249,6 @@ const SECTION_CSS = `
 .wrh-event .room-member-name { width: 300px; font-size: 16px !important; white-space: nowrap; }
 .wrh-event .wrh-info { flex: 1; min-width: 0; }
 .wrh-event .wrh-info:last-child { flex: 0 0 150px; text-align: right; }
-.wrh-btn { border: 1px solid rgb(231, 183, 124); background: rgb(254, 210, 145); color: rgb(142, 94, 67); border-radius: 14px; height: 26px; padding: 0 12px; font: inherit; font-size: 15px; cursor: pointer; }
-.wrh-btn:disabled { opacity: .5; cursor: default; }
 .wrh-empty { font-size: 16px; color: rgb(142, 123, 106); }
 `;
 
@@ -451,8 +461,10 @@ mod.onDispose(() => {
   removers.forEach(remove => remove());
   removers = [];
   stopSection();
+  buttonStyle?.();
 });
 
+const buttonStyle = mod.css?.(BUTTON_CSS);
 publish();
 startSection();
 draw();

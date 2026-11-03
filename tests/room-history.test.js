@@ -1163,6 +1163,22 @@ test('on the 联机 page: with nothing recorded it says so, and when the page go
   assert.equal(page.section().removed, true);
 });
 
+test('every button of the plugin is the MOD page\'s button: the pill that sinks when pressed, in the dialog and on the room page', () => {
+  // in the plugin's own settings
+  const panel = loadPanel(HISTORY, { here: 'BBB' });
+  const buttons = [...panel.controlsOf('房间号 AAA'), ...panel.controlsOf('房间号 BBB')];
+  assert.ok(buttons.length >= 3);
+  assert.ok(buttons.every(node => node.className === 'wrh-btn'), buttons.map(node => node.className).join());
+  // on the room page, and the look is given to both
+  const page = loadPage(HISTORY, { here: null });
+  page.appears();
+  const css = page.sheets.join('\n');
+  assert.match(css, /\.wrh-btn \{[^}]*height: 28px[^}]*border-radius: 20px[^}]*drop-shadow[^}]*transition: transform/);
+  assert.match(css, /\.wrh-btn:not\(:disabled\):active \{ transform: translateY\(1px\); filter: none; \}/);
+  assert.ok(page.section().find(node => node.className === 'wrh-btn').length >= 2, 'the room page uses it');
+  assert.ok(!/setting-btn/.test(panelSource), 'and nothing is left in the app\'s old style');
+});
+
 test('a loader without pages (no mod.page) leaves the list in the plugin\'s dialog as it was', () => {
   const panel = loadPanel(HISTORY, { here: 'BBB' });
   assert.deepEqual(panel.titles(), ['清空记录', '房间号 BBB', '　路人 进入了房间', '房间号 AAA']);
