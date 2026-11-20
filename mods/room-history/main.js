@@ -13,6 +13,9 @@
 //     rl  {a: id}                   somebody left
 //     ro  {a: id}                   somebody went offline (still in the room)
 //     rs  {r: room number}          the room was closed
+// and, from app 1.0.5 (read from its main-window bundle, not seen on a real room yet):
+//     rk  {u: [id, …]}              those were taken out of the room (the person's own id among them: the person was)
+//     rt  {a: id, o: id}            the owner was `a` and is `o`
 // and who is in a room when the app comes into it is not an event: it is the answer to the app's own
 // request for the room (an acknowledgement, `43<number>[…]`):
 //     {c: 0, d: {r: room number, m: [{u: id, n: nickname, o: 1 if the owner, l: 1 if online}, …]}}
@@ -350,6 +353,29 @@ function handle(session, { event, payload }) {
     if (id === selfId) return;
     record({ room: session.room, type: 'leave', id, name: nameOf(session, id) });
     session.members.delete(id);
+  } else if (event === 'rk') {
+    // Taken out of the room (from app 1.0.5): {u: [the ids of those taken out]}. The app takes the ones that are not the person
+    // for ones that left; the person's own id in it means the person is out, and the app ends the stay.
+    sample(event, payload);
+    const ids = Array.isArray(payload?.u) ? payload.u.map(idOf) : [];
+    if (!ids.length || ids.some(id => !id)) return cannotRead(event, payload);
+    for (const id of ids) {
+      if (id === selfId) {
+        record({ room: session.room, type: 'me-out', kicked: true });       // not a leaving to take back when the app comes back
+        session.members.clear();
+        session.dismissed = true;                      // the end is written: the connection that closes after this is not a second one
+        continue;
+      }
+      record({ room: session.room, type: 'leave', id, name: nameOf(session, id), kicked: true });
+      session.members.delete(id);
+    }
+  } else if (event === 'rt') {
+    // The owner of the room is another one now (from app 1.0.5): {a: who was, o: who is}.
+    sample(event, payload);
+    const was = idOf(payload?.a);
+    const now = idOf(payload?.o);
+    if (!was || !now || was === now) return cannotRead(event, payload);
+    record({ room: session.room, type: 'owner', id: now, from: was, ...(now === selfId ? { self: true } : { name: nameOf(session, now) }) });
   } else if (event === 'ro') {
     sample(event, payload);
     const id = idOf(payload?.a);

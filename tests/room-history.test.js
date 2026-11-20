@@ -157,6 +157,61 @@ test('a leave names only an id, and the nickname comes from when the person came
   assert.deepEqual(kinds(run).slice(1), [['join', '阿青', 'V3f9IQD1f'], ['leave', '阿青', 'V3f9IQD1f']]);
 });
 
+test('others taken out of the room (rk, app 1.0.5) are written as leaving, and as taken out', async () => {
+  const run = load();
+  const socket = run.connect();
+  socket.deliver('open');
+  await sleep(200);
+  socket.frame('rj', { a: 7, n: '阿青' });
+  socket.frame('rj', { a: 8, n: '小红' });
+  socket.frame('rk', { u: [7, 8] });
+
+  assert.deepEqual(run.history().slice(1).map(e => [e.type, e.name, e.kicked ?? false]), [['join', '阿青', false], ['join', '小红', false], ['leave', '阿青', true], ['leave', '小红', true]]);
+  socket.frame('rk', { u: [] });                              // nobody named, or an id that is not one: not understood, and nothing written
+  socket.frame('rk', { u: ['x'] });
+  socket.frame('rk', {});
+  assert.equal(run.history().length, 5);
+  assert.equal(run.warnings.length, 3);
+});
+
+test('the person taken out of the room: the stay ends then, marked, with no second leaving when the connection closes, and a return is a new stay', async () => {
+  const storage = makeStorage({ 'modkit-room-history-members': JSON.stringify({ room: 'V3f9IQD1f', self: 99, t: Date.now(), members: [] }) });
+  const run = load({ storage });
+  const socket = run.connect();
+  socket.deliver('open');
+  await sleep(200);
+  socket.frame('rj', { a: 7, n: '阿青' });
+  socket.frame('rk', { u: [7, 99] });                         // the person's own id among them
+
+  assert.deepEqual(run.history().map(e => [e.type, e.kicked ?? false]), [['me-in', false], ['join', false], ['leave', true], ['me-out', true]]);
+  socket.deliver('close');
+  await sleep(400);
+  assert.equal(run.history().filter(e => e.type === 'me-out').length, 1, 'the closing of the connection does not write another');
+
+  const again = run.connect();
+  again.deliver('open');
+  await sleep(50);
+  assert.deepEqual(run.history().filter(e => e.type === 'me-in').length, 2, 'coming back is a new stay: it is not the same connection coming back');
+});
+
+test('a new owner (rt, app 1.0.5) is written with who it is, and the person themselves is said as such', async () => {
+  const storage = makeStorage({ 'modkit-room-history-members': JSON.stringify({ room: 'V3f9IQD1f', self: 99, t: Date.now(), members: [] }) });
+  const run = load({ storage });
+  const socket = run.connect();
+  socket.deliver('open');
+  await sleep(200);
+  socket.frame('rj', { a: 7, n: '阿青' });
+  socket.frame('rt', { a: 5, o: 7 });
+  socket.frame('rt', { a: 7, o: 99 });                        // to the person
+
+  const owners = run.history().filter(e => e.type === 'owner');
+  assert.deepEqual(owners.map(e => [e.id, e.from, e.name ?? null, e.self ?? false]), [[7, 5, '阿青', false], [99, 7, null, true]]);
+  socket.frame('rt', { a: 7, o: 7 });                         // nobody changed: not understood
+  socket.frame('rt', { o: 3 });
+  assert.equal(run.history().filter(e => e.type === 'owner').length, 2);
+  assert.equal(run.warnings.length, 2);
+});
+
 test('the nickname is found in the history too, when this connection never saw the person come in', async () => {
   const storage = makeStorage({ 'modkit-room-history': JSON.stringify([{ t: 1, room: 'old', type: 'join', id: 9, name: '老朋友' }]) });
   const run = load({ storage });
@@ -1057,6 +1112,7 @@ function fakeElement(tag) {
     remove() { this.removed = true; },
     addEventListener(type, fn) { if (type === 'click') this.handlers.push(fn); },
     press() { this.handlers.forEach(fn => fn()); },
+    querySelector(selector) { return this.children.flatMap(child => child.find?.(node => node.className.split(' ').includes(selector.slice(1))) ?? [])[0] ?? null; },
     find(predicate) { return [this, ...this.children.flatMap(child => child.find?.(predicate) ?? [])].filter(predicate); },
     text() { return [this.textContent, ...this.children.map(child => child.text?.() ?? '')].join(' ').replace(/\s+/g, ' ').trim(); },
   };
@@ -1152,6 +1208,20 @@ test('on the 联机 page: 展开 shows what happened in the room, and 收起 clo
   assert.ok(page.section().find(node => node.textContent === '收起').length >= 1);
 });
 
+test('on the 联机 page: opening or closing a room keeps the list where it was scrolled to', () => {
+  const page = loadPage(HISTORY, { here: null });
+  page.appears();
+  const list = () => page.section().children[1];
+  list().scrollTop = 120;                                                    // the person has scrolled down
+  list().children[1].find(node => node.textContent === '展开')[0].press();
+  assert.equal(list().scrollTop, 120, 'the new list is put back where the old one was');
+  list().children[1].find(node => node.textContent === '收起')[0].press();
+  assert.equal(list().scrollTop, 120, 'and again on closing');
+  const fresh = loadPage(HISTORY, { here: null });
+  fresh.appears();
+  assert.ok(!fresh.section().children[1].scrollTop, 'a list never scrolled stays at the top');
+});
+
 test('on the 联机 page: with nothing recorded it says so, and when the page goes or the plugin stops, the section goes', () => {
   const page = loadPage([], { here: null });
   page.appears();
@@ -1161,6 +1231,24 @@ test('on the 联机 page: with nothing recorded it says so, and when the page go
   page.dispose();
   assert.equal(page.sheets.length, 0, 'and its stylesheet');
   assert.equal(page.section().removed, true);
+});
+
+test('being taken out and a change of owner are said in words: on the stay, and in what happened in it', () => {
+  const entries = [
+    { t: at(29, 14, 0), room: 'KKK', type: 'me-in' },
+    { t: at(29, 14, 0, 1), room: 'KKK', type: 'join', id: 7, name: '阿青' },
+    { t: at(29, 14, 5), room: 'KKK', type: 'owner', id: 7, from: 5, name: '阿青' },
+    { t: at(29, 14, 6), room: 'KKK', type: 'owner', id: 99, from: 7, self: true },
+    { t: at(29, 14, 9), room: 'KKK', type: 'leave', id: 7, name: '阿青', kicked: true },
+    { t: at(29, 14, 10), room: 'KKK', type: 'me-out', kicked: true },
+  ];
+  const panel = loadPanel(entries, { here: null });
+  assert.deepEqual(panel.titles(), ['清空记录', '房间号 KKK', '　阿青 被移出了房间', '　本人 成为房主', '　阿青 成为房主', '　阿青 进入了房间'], 'newest first');
+  const description = panel.row('房间号 KKK').description;
+  assert.match(description, /1 人/);
+  assert.match(description, /被移出房间/);
+  assert.doesNotMatch(description, /还在这个房间里|没有记录到离开/);
+  assert.ok(!/[我咱您你她]|(?<!其)他/.test(['阿青 被移出了房间', '本人 成为房主'].join()), 'no person words');
 });
 
 test('every button of the plugin is the MOD page\'s button: the pill that sinks when pressed, in the dialog and on the room page', () => {
@@ -1177,6 +1265,12 @@ test('every button of the plugin is the MOD page\'s button: the pill that sinks 
   assert.match(css, /\.wrh-btn:not\(:disabled\):active \{ transform: translateY\(1px\); filter: none; \}/);
   assert.ok(page.section().find(node => node.className === 'wrh-btn').length >= 2, 'the room page uses it');
   assert.ok(!/setting-btn/.test(panelSource), 'and nothing is left in the app\'s old style');
+});
+
+test('the rows of the room page keep their own height: the app\'s list is a flex column, and rows that may shrink get cut off', () => {
+  const page = loadPage(HISTORY, { here: null });
+  page.appears();
+  assert.match(page.sheets.join('\n'), /\.wrh-section \.room-members li \{[^}]*flex: 0 0 auto[^}]*height: auto/);
 });
 
 test('a loader without pages (no mod.page) leaves the list in the plugin\'s dialog as it was', () => {

@@ -1,0 +1,33 @@
+{
+  "name": "keep-on-top",
+  "displayName": "保持置顶",
+  "version": "0.1.0",
+  "description": "定时把桌宠窗口重新提到最前，避免被其他窗口盖住；游戏模式、窗口隐藏或正在拖动时不做",
+  "author": "Yueby",
+  "modkit": {
+    "permissions": [
+      "app-commands"
+    ],
+    "windows": {
+      "main": "main.js"
+    },
+    "settings": [
+      {
+        "key": "interval",
+        "type": "number",
+        "title": "间隔（秒）",
+        "description": "每隔多久重新置顶一次，5 到 120。",
+        "default": 15,
+        "min": 5,
+        "max": 120,
+        "step": 5
+      },
+      {
+        "key": "state",
+        "type": "value",
+        "title": "状态",
+        "default": "未运行"
+      }
+    ]
+  }
+}

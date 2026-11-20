@@ -14,6 +14,7 @@ The plugin registry for the [Wuwa Tappo plugin loader](https://github.com/Yueby/
 | **桌宠手感** (Pet feel) | Elastic motion for pressing, dragging, releasing, clicking and throwing a pet, with gravity, turning and rolling; the same for every pet | on | read and change the app's own state (whether a pet is held and moving, and setting its place when thrown) |
 | **气泡弹跳** (Bubble pop) | The emote bubbles a pet sends out are springy: they swell and spring back as they come out, and sway as they float up | on | add to the app's page and change its styles (only the animation of a bubble) |
 | **记住桌宠位置** (Pet position) | Records the positions of the person's own pet and the other players' pets, and restores them after a restart or on entering a room | on | read and change the app's own state (only used to set the pets' places) |
+| **保持置顶** (Keep on top) | Lifts the pet window to the front again at an interval, so that other windows do not cover it; not in game mode, while the window is hidden, or while a pet is dragged | on | sending the app a command (only to put the pet window on top again) |
 
 Plugins that act on the account are off after they are installed; they are switched on on the MOD page. How each is used is in [the loader's README](https://github.com/Yueby/wuwatappo-modkit/blob/main/README.en.md#how-each-plugin-is-used).
 

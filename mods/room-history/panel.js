@@ -22,7 +22,8 @@ const VISITS = 30;                 // rooms in the dialog; the records of the re
 const TEXT = {
   here: entry => `${entry.name || '玩家'} 已在房间里${entry.owner ? '（房主）' : ''}${entry.offline ? '（离线）' : ''}`,
   join: entry => `${entry.name || '玩家'} 进入了房间`,
-  leave: entry => `${entry.name || '玩家'} 离开了房间`,
+  leave: entry => `${entry.name || '玩家'} ${entry.kicked ? '被移出了房间' : '离开了房间'}`,
+  owner: entry => `${entry.self ? '本人' : entry.name || '玩家'} 成为房主`,
   offline: entry => `${entry.name || '玩家'} 掉线了`,
   online: entry => `${entry.name || '玩家'} 重新上线`,
   dismiss: () => '房间已解散',
@@ -71,7 +72,7 @@ function visitsOf(list) {
   const open = new Map();                                      // room -> its visit that has not ended
   const ended = new Set();                                     // rooms whose latest visit has ended
   const begin = (entry, known) => {
-    const visit = { room: entry.room, start: entry.t, end: null, known, dismissed: false, events: [], first: new Map(), people: new Set() };
+    const visit = { room: entry.room, start: entry.t, end: null, known, dismissed: false, kicked: false, events: [], first: new Map(), people: new Set() };
     visits.push(visit);
     open.set(entry.room, visit);
     ended.delete(entry.room);
@@ -88,6 +89,7 @@ function visitsOf(list) {
     const visit = open.get(entry.room) ?? begin(entry, false);
     if (entry.type === 'me-out') {
       visit.end = entry.t;
+      visit.kicked = entry.kicked === true;
       open.delete(entry.room);
       ended.add(entry.room);
       continue;
@@ -151,6 +153,7 @@ function visitRow(visit, isOpen, here) {
   if (visit.people.size) parts.push(`${visit.people.size} 人`);
   if (visit.known && visit.end) parts.push(`待了 ${lengthText(visit.end - visit.start)}`);
   if (visit.dismissed) parts.push('房间被解散');
+  else if (visit.kicked) parts.push('被移出房间');
   else if (!visit.end) parts.push(visit.room === here ? '还在这个房间里' : '没有记录到离开');
 
   return {
@@ -242,7 +245,7 @@ const SECTION_CSS = `
 .wrh-section { flex: 1 1 0; min-height: 190px; display: flex; flex-direction: column; margin-top: 22px; padding-bottom: 22px; }
 .wrh-section .room-info { flex: 0 0 auto; }
 .wrh-section .room-members { flex: 1 1 0; min-height: 0; margin-top: 14px; overflow-y: auto; padding-right: 4px; }
-.wrh-section .room-members li { height: auto; min-height: 36px; padding: 5px 20px; gap: 12px; flex-wrap: wrap; }
+.wrh-section .room-members li { flex: 0 0 auto; height: auto; min-height: 36px; padding: 5px 20px; gap: 12px; flex-wrap: wrap; }
 .wrh-section .room-members .room-member-name { width: 200px; }
 .wrh-info { flex: 1; min-width: 160px; font-size: 15px; color: rgb(142, 123, 106); }
 .wrh-event { background: transparent !important; min-height: 28px !important; padding-left: 44px !important; }
@@ -330,7 +333,11 @@ function renderSection() {
   const header = el('div', 'room-info');
   header.append(el('div', 'room-qty', '房间历史'));
   header.append(el('div', 'room-number', `共 ${visits.length} 个房间，${all.length} 条记录`));
-  sectionNode.replaceChildren(header, sectionRows(visits, currentRoom()));
+  // The list is drawn anew each time (opening a room, a new entry), and a new list starts at the top: keep where the old one was scrolled to.
+  const scrolled = sectionNode.querySelector('.room-members')?.scrollTop ?? 0;
+  const list = sectionRows(visits, currentRoom());
+  sectionNode.replaceChildren(header, list);
+  if (scrolled) list.scrollTop = scrolled;
 }
 
 function startSection() {
