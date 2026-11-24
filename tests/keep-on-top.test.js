@@ -119,7 +119,8 @@ test('a window that cannot be turned on again is tried again at once, so the fla
   assert.deepEqual(flagCommands(run).slice(0, 3), ['set_always_on_top main false', 'set_always_on_top main true', 'set_always_on_top main true'], 'off, the on that failed, and the one that puts it back');
   assert.equal(run.warned.length, 1);
   assert.match(run.warned[0], /window gone/);
-  assert.match(run.last(), /^置顶失败：window gone$/);
+  // said at some point (a later round, on a slow machine, goes on and says it is on top again, so the last word is not the one to look at)
+  assert.ok(run.said.some(([, text]) => /^置顶失败：window gone$/.test(text)), run.said.map(s => s[1]).join(' / '));
 });
 
 test('the same failure is said once, not at every round, and is not said as something that went wrong when the window is only hidden', async () => {
