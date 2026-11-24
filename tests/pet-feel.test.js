@@ -60,11 +60,12 @@ function load({ config = {} } = {}) {
   const handlers = { me: null, members: null };
   const glides = [];                                         // what was thrown: { key, options, stopped }
   const disposers = [];
+  const watchers = [];
   const mod = {
     log() {},
-    css: text => { sheets.push(text); return () => {}; },
+    css: text => { sheets.push(text); return () => { const at = sheets.indexOf(text); if (at >= 0) sheets.splice(at, 1); }; },
     onDispose: fn => disposers.push(fn),
-    config: { get: key => settings[key] },
+    config: { get: key => settings[key], onChange: (key, fn) => { watchers.push({ key, fn }); return () => {}; } },
     app: {
       pet: { content: () => nodes.me, onInteraction: fn => { handlers.me = fn; }, glide: options => { const g = { key: 'me', options, stopped: false }; glides.push(g); return { stop() { g.stopped = true; } }; } },
       members: { element: id => nodes[String(id)] ?? null, onInteraction: fn => { handlers.members = fn; }, glide: (id, options) => { const g = { key: String(id), options, stopped: false }; glides.push(g); return { stop() { g.stopped = true; } }; } },
@@ -75,6 +76,8 @@ function load({ config = {} } = {}) {
     nodes, sheets, settings, glides,
     own: nodes.me,
     dispose: () => disposers.forEach(fn => fn()),
+    // the person changes a setting: the app of the loader says so to whoever watches it
+    change(key, value) { const before = settings[key]; settings[key] = value; watchers.filter(w => w.key === key).forEach(w => w.fn(value, before)); },
     me: event => handlers.me(event),
     member: (id, event) => handlers.members({ id, ...event }),
     friend(id) { nodes[String(id)] = element(); return nodes[String(id)]; },
@@ -87,7 +90,7 @@ test('what it declares: the main window, the patched pieces it needs, the api, a
   assert.deepEqual(manifest.modkit.windows, { main: 'main.js' });
   assert.deepEqual(manifest.modkit.permissions, ['app-internals']);
   assert.equal(manifest.modkit.api, 10);
-  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['press', 'drag', 'release', 'click', 'throw', 'spin', 'gravity', 'strength']);
+  assert.deepEqual(manifest.modkit.settings.map(s => s.key), ['press', 'drag', 'release', 'click', 'throw', 'spin', 'gravity', 'breathe', 'strength']);
   assert.ok(manifest.modkit.settings.filter(s => s.type === 'toggle').every(s => s.default === true), 'every motion is on to begin with');
   const code = source.split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
   assert.ok(!/fetch\(|XMLHttpRequest|new WebSocket|localStorage|invoke\(/.test(code), 'it only changes how the pet looks');
@@ -104,6 +107,42 @@ test('the motion is a stylesheet on the pet\'s body, from its feet, springy, and
   assert.match(css, /prefers-reduced-motion: reduce/);
   assert.ok(!/\.pet-dock(?![-\w])/.test(css), 'the dock, which holds the size of the pet, is not touched');
   assert.ok(!/\.wf-(down|drag|bounce|pop)\b/.test(css), 'attributes, not classes: the app takes the classes of a player\'s pet away whenever it is picked up or put down');
+});
+
+test('breathing: a pet that is not touched rises and narrows a little from its feet, in steps, and does not take anything from the motions', () => {
+  const run = load();
+  const sheet = () => run.sheets.find(text => text.includes('wf-breathe')) ?? '';
+  const css = sheet();
+  assert.ok(css, 'a stylesheet of its own');
+  assert.match(css, /:is\(\.pet-dock-content, \.room-cat-shell\):not\(\[data-wf\]\) :is\(\.cat-mainbox, \.room-cat-pet\) \{ animation: wf-breathe 3\.8s steps\(1, jump-end\) infinite; \}/, 'only while no motion is set on the pet');
+  const keyframes = css.match(/@keyframes wf-breathe \{([^]*?)\n\}/)[1];
+  assert.ok(!/transform/.test(keyframes), 'the element\'s own scale, which goes along with a transform and does not replace it');
+  const stops = [...keyframes.matchAll(/([\d.]+)% \{ scale: ([\d.]+) ([\d.]+); \}/g)].map(m => ({ at: Number(m[1]), x: Number(m[2]), y: Number(m[3]) }));
+  assert.equal(stops.length, 41, 'forty moments of a breath, and the end of it');
+  assert.deepEqual([stops[0].x, stops[0].y, stops.at(-1).x, stops.at(-1).y], [1, 1, 1, 1], 'it begins and ends at its size');
+  const top = stops[20];
+  assert.ok(top.y > 1.02 && top.y < 1.025 && top.x < 1 && top.x > 0.99, `half way it is a little taller and a little narrower (${top.x}, ${top.y})`);
+  assert.ok(stops.every(s => s.y >= 1 && s.y <= top.y), 'and never more than that');
+  const starts = [...css.matchAll(/data-room-cat-id\$="(\d)"\]:not\(\[data-wf\]\) [^{]*\{ animation-delay: (-?[\d.]+)s; \}/g)];
+  assert.equal(new Set(starts.map(m => m[2])).size, 10, 'a player\'s pet starts at one of ten moments by the last digit of its id, so that a room does not breathe all at once');
+  assert.match(css, /prefers-reduced-motion: reduce\) \{\s*:is\(\.pet-dock-content, \.room-cat-shell\):not\(\[data-wf\]\) :is\(\.cat-mainbox, \.room-cat-pet\) \{ animation: none; \}/);
+});
+
+test('breathing: the strength sets the size of it, and a switch takes the stylesheet away and brings it back', () => {
+  const size = text => Number(text.match(/50%|\n  (?:[\d.]+)% \{ scale: [\d.]+ ([\d.]+)/g) && [...text.matchAll(/scale: [\d.]+ ([\d.]+); \}/g)].map(m => Number(m[1])).sort((a, b) => b - a)[0]);
+  const run = load();
+  const sheet = () => run.sheets.find(text => text.includes('wf-breathe'));
+  const one = size(sheet());
+  run.change('strength', 2);
+  assert.ok(Math.abs((size(sheet()) - 1) - 2 * (one - 1)) < 0.0005, 'twice the strength, twice the rise');
+  assert.equal(run.sheets.filter(text => text.includes('wf-breathe')).length, 1, 'the old one is replaced, not added to');
+  run.change('breathe', false);
+  assert.equal(sheet(), undefined, 'switched off: gone');
+  assert.ok(run.sheets.some(text => text.includes('wf-bounce')), 'and the motions are as they were');
+  run.change('breathe', true);
+  assert.ok(sheet(), 'switched on: back');
+  const off = load({ config: { breathe: false } });
+  assert.ok(!off.sheets.some(text => text.includes('wf-breathe')), 'switched off from the start: never there');
 });
 
 test('pressed: the body is pressed down; dragged: picked up and swung the way it is pulled; let go: it bounces', async () => {

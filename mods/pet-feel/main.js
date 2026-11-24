@@ -14,6 +14,7 @@
 // not do on a player's pet, because the app sets that element's classes again whenever it is picked up or put down,
 // and takes the ones it does not know with it; an attribute it leaves alone. The pet's size, which the app sets on
 // the element above the body, and its places are not touched (the body is squashed from its feet).
+// A pet that nobody is touching breathes (see `breathCss`), and stops for any of the motions above.
 
 const CLICK_MS = 250;             // pressed and let go within this long, without moving, is a click
 const BOUNCE_MS = 700;            // how long the bounce after a drag, and the jump of a click, are looked after
@@ -99,6 +100,43 @@ const strength = () => {
   const value = Number(mod.config.get('strength'));
   return Number.isFinite(value) ? Math.min(2, Math.max(0.5, value)) : 1;
 };
+
+// Breathing, while a pet is not being touched (no `data-wf`): the body rises a little and narrows a little, from its feet, and goes back.
+// It is the element's own `scale` property, which goes along with a `transform` and does not replace it, so it takes nothing from the
+// motions above; it is gone as soon as one of them sets `data-wf`. The players' pets are given different starts (the last digit of
+// the id they are drawn with), so that a room does not breathe all at once.
+const BREATH_S = 3.8;               // seconds for one breath
+const BREATH_STEPS = 40;            // the moments of a breath that are drawn (about ten a second)
+const BREATH_RISE = 0.022;         // how much taller at the top of a breath, before the strength
+const BREATH_NARROW = 0.009;        // and how much narrower
+function breathCss() {
+  const k = strength();
+  const starts = [...'0123456789']
+    .map(digit => `.room-cat-shell[data-room-cat-id$="${digit}"]:not([data-wf]) ${BODY} { animation-delay: ${(-BREATH_S * digit / 10).toFixed(2)}s; }`)
+    .join('\n');
+  // The whole change is a few pixels, and drawing it at the screen's rate would keep the window being redrawn all the time (a sixth of a
+  // core, measured), so it is a value for each of BREATH_STEPS moments of a breath, along a sine, each held until the next.
+  const stops = Array.from({ length: BREATH_STEPS }, (_, i) => {
+    const wave = (1 - Math.cos((2 * Math.PI * i) / BREATH_STEPS)) / 2;      // 0 at the start, 1 half way, and back
+    return `${((100 * i) / BREATH_STEPS).toFixed(3)}% { scale: ${(1 - BREATH_NARROW * k * wave).toFixed(4)} ${(1 + BREATH_RISE * k * wave).toFixed(4)}; }`;
+  }).join('\n  ');
+  return `
+@keyframes wf-breathe {
+  ${stops}
+  100% { scale: 1 1; }
+}
+:is(.pet-dock-content, .room-cat-shell):not([data-wf]) ${BODY} { animation: wf-breathe ${BREATH_S}s steps(1, jump-end) infinite; }
+${starts}
+@media (prefers-reduced-motion: reduce) {
+  :is(.pet-dock-content, .room-cat-shell):not([data-wf]) ${BODY} { animation: none; }
+}
+`;
+}
+let breathStyle = null;
+function breathe() {
+  breathStyle?.();
+  breathStyle = on('breathe') ? mod.css(breathCss()) : null;
+}
 
 // What each pet is doing: 'me' or a player's id -> { mode, tilt, speed, rot, spin, motion, glide, timer }.
 // `rot` is the turning that is shown (degrees); `spin` is { angle, omega } while it is turning on its own; `motion` is how it was last
@@ -285,6 +323,9 @@ if (!mod.app?.pet?.onInteraction) {
   mod.log('这个版本的加载器没有桌宠的互动事件，请先更新加载器');
 } else {
   mod.css(CSS);
+  breathe();
+  mod.config.onChange('breathe', breathe);
+  mod.config.onChange('strength', breathe);
   mod.app.pet.onInteraction(event => handle('me', event));
   mod.app.members.onInteraction(event => handle(String(event.id), event));
 }
